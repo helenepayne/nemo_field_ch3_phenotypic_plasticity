@@ -15,3 +15,6 @@
 # We do NOT ignore the entire data/ directory because data/aster_outputs/
 # is vendored from chapter 1 and must remain tracked.
 data/*.csv
+
+# Data loaded by Rmds via here::here('data_sheets/compiled_sheets/...')
+data_sheets/
