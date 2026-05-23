@@ -10,11 +10,15 @@
 *_files/
 *_cache/
 
-# Compiled-sheet data CSVs (fetched from Dryad on first run via
-# R/fetch_dryad.R, or populated manually while the package is embargoed).
-# We do NOT ignore the entire data/ directory because data/aster_outputs/
-# is vendored from chapter 1 and must remain tracked.
-data/*.csv
+# All data files are local only — populated manually or via fetch_dryad.R
+data/
 
-# Data loaded by Rmds via here::here('data_sheets/compiled_sheets/...')
-data_sheets/
+# Generated figures (written by Rmd knit)
+Figures/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.tiff
+*.webp

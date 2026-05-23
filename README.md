@@ -13,7 +13,7 @@ This chapter has two kinds of inputs:
 four sites (AC, BB, BO, HR) live in the Dryad data package
 [10.5061/dryad.pvmcvdp1p](https://doi.org/10.5061/dryad.pvmcvdp1p) and are
 fetched on first run by `R/fetch_dryad.R` into `data/`. The Rmds reference
-them via `here::here("data_sheets/compiled_sheets", ...)` (legacy path) — for
+them via `here::here("data/compiled_sheets", ...)` (legacy path) — for
 new analyses, prefer reading from `data/` directly. While the Dryad package is
 still private, populate `data/` manually from your local copy.
 

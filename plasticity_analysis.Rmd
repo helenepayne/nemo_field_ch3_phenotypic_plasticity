@@ -83,7 +83,7 @@ observed fecundity used in the sensitivity analysis.
 ```{r load-site}
 load_site <- function(site) {
   read_one <- function(year_int, gen_filter) {
-    path <- here("data_sheets/compiled_sheets",
+    path <- here("data/compiled_sheets",
                  paste0(site, "_compiledsheet_full_", year_int, ".csv"))
     d <- read_csv(path, show_col_types = FALSE)
     if (gen_filter) d <- d %>% filter(Gen == "G1")
@@ -448,7 +448,9 @@ run_W_analyses <- function(W_df, plasticity, mean_dir, mean_piv) {
       ct  <- with(sub, cor.test(directional, mean_W))
       tibble(Site = site, Trait = tr,
              n = sum(complete.cases(sub$directional, sub$mean_W)),
-             r = unname(ct$estimate), p = ct$p.value)
+             r = unname(ct$estimate),
+             conf_low = ct$conf.int[1], conf_high = ct$conf.int[2],
+             p = ct$p.value)
     })
   })
   dir_meanW_multi <- purrr::map_dfr(SITES, function(site) {
@@ -457,7 +459,9 @@ run_W_analyses <- function(W_df, plasticity, mean_dir, mean_piv) {
     ct <- with(d, cor.test(mean_directional, mean_W))
     tibble(Site = site, Trait = "multivariate",
            n = sum(complete.cases(d$mean_directional, d$mean_W)),
-           r = unname(ct$estimate), p = ct$p.value)
+           r = unname(ct$estimate),
+           conf_low = ct$conf.int[1], conf_high = ct$conf.int[2],
+           p = ct$p.value)
   })
   dir_meanW_cor <- bind_rows(dir_meanW_cor, dir_meanW_multi) %>%
     arrange(Site, Trait)
