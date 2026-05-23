@@ -377,8 +377,9 @@ analysis helper (defined in §8) runs on both.
 
 ```{r load-BV}
 read_BV <- function(site, year) {
-  fpath <- here("chapter_1_adaptive_capacity", "aster", "processed_data",
-                paste0(site, year, "_bhat.Donor.mu.csv"))
+  fname <- if (year == "22") paste0(site, year, "_bhat.Donor.mu.csv") else
+                             paste0(site, year, "_bhat.donor.mu.csv")
+  fpath <- here("data", "aster_outputs", fname)
   d <- read.csv(fpath, stringsAsFactors = FALSE, check.names = FALSE)
   colnames(d)[1] <- "raw"
   colnames(d)[2] <- "BV_W"
