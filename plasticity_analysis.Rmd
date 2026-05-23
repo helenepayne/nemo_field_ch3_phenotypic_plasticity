@@ -760,7 +760,7 @@ significant indicate a result that should be treated as marginal under
 the multiple-testing burden of 4 traits × 4 sites × multiple model
 frameworks.
 
-```{r comparison}
+```{r comparison-setup}
 sig_compare <- function(prim, sens, value_col, p_col, label) {
   prim %>%
     dplyr::select(Site, Trait, primary_beta = !!sym(value_col),
@@ -795,16 +795,25 @@ cmp_cor  <- sig_compare(primary$dir_meanW_cor, sensitivity$dir_meanW_cor,
 
 comparison <- bind_rows(cmp_cor, cmp_eq5, cmp_eq6, cmp_eq78) %>%
   arrange(test, Site, Trait)
+```
 
-cat("\n--- All Site × Trait × test comparisons ---\n")
+## All Site × Trait × test comparisons
+
+```{r comparison-all}
 print(comparison, n = Inf)
+```
 
-cat("\n--- Cells where the two metrics disagree on significance ---\n")
+## Cells where the two metrics disagree on significance
+
+```{r comparison-disagree}
 disagree <- comparison %>% filter(agreement %in% c("primary only",
                                                    "sensitivity only"))
 print(disagree, n = Inf)
+```
 
-cat("\n--- Cells where both metrics reached p < 0.05 ---\n")
+## Cells where both metrics reached p < 0.05
+
+```{r comparison-agree-sig}
 agree_sig <- comparison %>% filter(agreement == "both p<0.05")
 print(agree_sig, n = Inf)
 ```
