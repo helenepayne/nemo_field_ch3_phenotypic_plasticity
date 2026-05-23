@@ -15,6 +15,7 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
                       fig.path = "Figures/", dev = c("png", "pdf"))
+dir.create(here::here("Tables"), showWarnings = FALSE)
 ```
 
 This R Markdown reproduces the analyses reported in *Chapter 3:
@@ -1092,6 +1093,57 @@ maintained in the manuscript / supplement directly:
 - **Static methods tables** — Table 3 (trait descriptions), Table S1
   (sowing dates), Table S1 (greenhouse fruit set), Tables S2–S3
   (sibship / transect counts): hand-curated metadata.
+
+# 14. CSV table export
+
+All analysis tables are written to `Tables/` as CSVs.
+
+```{r write-tables}
+wt <- function(df, fname) write_csv(df, here("Tables", fname))
+
+# §2 — PIv vs PImd robustness (Table S4)
+wt(piv_pimd_cor, "S4_piv_pimd_cor.csv")
+
+# §3 — Trait-level mean PIv (Table S6)
+wt(piv_by_trait, "S6_piv_by_trait.csv")
+
+# §3 — Rank correlations between years (Table S7)
+wt(rank_cor_years, "S7_rank_cor_years.csv")
+
+# §4 — Year LMM fixed effects (Eq. 3)
+wt(year_lmm_results, "year_lmm_results.csv")
+
+# §5 — G×Y LRT (Eq. 4)
+wt(gxy_lrt, "gxy_lrt.csv")
+
+# §5 — G×Y variance components (raw)
+wt(gxy_varcomp, "gxy_varcomp.csv")
+
+# §9 PRIMARY — aster sire-effect fitness
+wt(primary$dir_meanW_cor, "S12_primary_dir_meanW_cor.csv")
+wt(primary$eq5,           "primary_eq5.csv")
+wt(primary$eq6,           "primary_eq6.csv")
+wt(primary$eq78,          "primary_eq78.csv")
+wt(primary$s10,           "S10_primary_piv_W_Y2.csv")
+wt(primary$s15,           "S15_primary_dir_W_Y2.csv")
+wt(primary$s16,           "S16_primary_piv_deltaW.csv")
+wt(primary$s17,           "S17_primary_dir_deltaW.csv")
+
+# §10 SENSITIVITY — observed fecundity
+wt(sensitivity$dir_meanW_cor, "sens_dir_meanW_cor.csv")
+wt(sensitivity$eq5,           "sens_eq5.csv")
+wt(sensitivity$eq6,           "sens_eq6.csv")
+wt(sensitivity$eq78,          "sens_eq78.csv")
+wt(sensitivity$s10,           "sens_piv_W_Y2.csv")
+wt(sensitivity$s15,           "sens_dir_W_Y2.csv")
+wt(sensitivity$s16,           "sens_piv_deltaW.csv")
+wt(sensitivity$s17,           "sens_dir_deltaW.csv")
+
+# §11 — Primary vs sensitivity comparison
+wt(comparison, "comparison_all.csv")
+wt(disagree,   "comparison_disagree.csv")
+wt(agree_sig,  "comparison_agree_sig.csv")
+```
 
 # Session info
 

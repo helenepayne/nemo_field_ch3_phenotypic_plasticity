@@ -13,8 +13,9 @@
 # All data files are local only — populated manually or via fetch_dryad.R
 data/
 
-# Generated figures (written by Rmd knit)
+# Generated figures and tables (written by Rmd knit)
 Figures/
+Tables/
 *.png
 *.jpg
 *.jpeg
@@ -23,3 +24,4 @@ Figures/
 *.tiff
 *.webp
 *.pdf
+*.csv
