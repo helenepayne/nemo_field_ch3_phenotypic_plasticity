@@ -573,10 +573,68 @@ run_W_analyses <- function(W_df, plasticity, mean_dir, mean_piv) {
   })
   eq78 <- bind_rows(eq78, eq78_multi) %>% arrange(Site, Trait)
 
+  # 8e. Pearson r tables (S10, S15, S16, S17)
+  #
+  # S10: PIv          vs W_Y2    (PIv_TRAITS — PIv is undefined for δ13C)
+  # S15: directional  vs W_Y2    (all TRAITS)
+  # S16: PIv          vs deltaW  (PIv_TRAITS)
+  # S17: directional  vs deltaW  (all TRAITS)
+  pearson_cor <- function(x, y) {
+    ok <- complete.cases(x, y)
+    if (sum(ok) < 3) {
+      return(tibble(n = sum(ok), r = NA_real_,
+                    conf_low = NA_real_, conf_high = NA_real_,
+                    p = NA_real_))
+    }
+    ct <- cor.test(x[ok], y[ok])
+    tibble(n = sum(ok), r = unname(ct$estimate),
+           conf_low = ct$conf.int[1], conf_high = ct$conf.int[2],
+           p = ct$p.value)
+  }
+  cor_per_trait <- function(plast_field, plast_col, W_col, traits) {
+    purrr::map_dfr(SITES, function(site) {
+      d <- plasticity[[site]][[plast_field]] %>%
+        inner_join(filter(W_df, Site == site), by = "Donor")
+      purrr::map_dfr(traits, function(tr) {
+        sub <- filter(d, Trait == tr)
+        pearson_cor(sub[[plast_col]], sub[[W_col]]) %>%
+          mutate(Site = site, Trait = tr, .before = 1)
+      })
+    })
+  }
+  cor_multi <- function(mean_plast, mean_col, W_col) {
+    purrr::map_dfr(SITES, function(site) {
+      d <- filter(mean_plast, Site == site) %>%
+        inner_join(filter(W_df, Site == site), by = "Donor")
+      pearson_cor(d[[mean_col]], d[[W_col]]) %>%
+        mutate(Site = site, Trait = "multivariate", .before = 1)
+    })
+  }
+  s10 <- bind_rows(
+    cor_per_trait("PIv", "PIv", "W_Y2", PIv_TRAITS),
+    cor_multi(mean_piv, "mean_PIv", "W_Y2")
+  ) %>% arrange(Site, Trait)
+  s15 <- bind_rows(
+    cor_per_trait("directional", "directional", "W_Y2", TRAITS),
+    cor_multi(mean_dir, "mean_directional", "W_Y2")
+  ) %>% arrange(Site, Trait)
+  s16 <- bind_rows(
+    cor_per_trait("PIv", "PIv", "deltaW", PIv_TRAITS),
+    cor_multi(mean_piv, "mean_PIv", "deltaW")
+  ) %>% arrange(Site, Trait)
+  s17 <- bind_rows(
+    cor_per_trait("directional", "directional", "deltaW", TRAITS),
+    cor_multi(mean_dir, "mean_directional", "deltaW")
+  ) %>% arrange(Site, Trait)
+
   list(dir_meanW_cor = dir_meanW_cor,
        eq5           = eq5,
        eq6           = eq6,
-       eq78          = eq78)
+       eq78          = eq78,
+       s10           = s10,
+       s15           = s15,
+       s16           = s16,
+       s17           = s17)
 }
 ```
 
@@ -586,18 +644,54 @@ run_W_analyses <- function(W_df, plasticity, mean_dir, mean_piv) {
 primary <- run_W_analyses(W_aster, plasticity,
                           mean_directional_by_family,
                           mean_PIv_by_family)
+```
 
-cat("\n--- 9a. Pearson r: directional plasticity vs mean W (aster) ---\n")
+## 9a. Pearson r: directional plasticity vs mean W
+
+```{r primary-9a}
 print(primary$dir_meanW_cor, n = Inf)
+```
 
-cat("\n--- 9b. Eq. 5: W_Y2 ~ W_Y1 + directional (aster) ---\n")
+## 9b. Eq. 5 — W_Y2 ~ W_Y1 + directional
+
+```{r primary-9b}
 print(primary$eq5, n = Inf)
+```
 
-cat("\n--- 9c. Eq. 6: deltaW ~ mean_W + directional (aster) ---\n")
+## 9c. Eq. 6 — deltaW ~ mean_W + directional
+
+```{r primary-9c}
 print(primary$eq6, n = Inf)
+```
 
-cat("\n--- 9d. Eq. 7/8: deltaW ~ PIv (aster) ---\n")
+## 9d. Eq. 7/8 — deltaW ~ PIv
+
+```{r primary-9d}
 print(primary$eq78, n = Inf)
+```
+
+## 9e. Table S10 — Pearson r: PIv vs W_Y2
+
+```{r primary-9e}
+print(primary$s10, n = Inf)
+```
+
+## 9f. Table S15 — Pearson r: directional vs W_Y2
+
+```{r primary-9f}
+print(primary$s15, n = Inf)
+```
+
+## 9g. Table S16 — Pearson r: PIv vs deltaW
+
+```{r primary-9g}
+print(primary$s16, n = Inf)
+```
+
+## 9h. Table S17 — Pearson r: directional vs deltaW
+
+```{r primary-9h}
+print(primary$s17, n = Inf)
 ```
 
 # 10. SENSITIVITY analysis — observed fecundity
@@ -606,18 +700,54 @@ print(primary$eq78, n = Inf)
 sensitivity <- run_W_analyses(W_fec, plasticity,
                               mean_directional_by_family,
                               mean_PIv_by_family)
+```
 
-cat("\n--- 10a. Pearson r: directional plasticity vs mean W (fecundity) ---\n")
+## 10a. Pearson r: directional plasticity vs mean W
+
+```{r sens-10a}
 print(sensitivity$dir_meanW_cor, n = Inf)
+```
 
-cat("\n--- 10b. Eq. 5 (fecundity) ---\n")
+## 10b. Eq. 5 — W_Y2 ~ W_Y1 + directional
+
+```{r sens-10b}
 print(sensitivity$eq5, n = Inf)
+```
 
-cat("\n--- 10c. Eq. 6 (fecundity) ---\n")
+## 10c. Eq. 6 — deltaW ~ mean_W + directional
+
+```{r sens-10c}
 print(sensitivity$eq6, n = Inf)
+```
 
-cat("\n--- 10d. Eq. 7/8 (fecundity) ---\n")
+## 10d. Eq. 7/8 — deltaW ~ PIv
+
+```{r sens-10d}
 print(sensitivity$eq78, n = Inf)
+```
+
+## 10e. Table S10 equivalent — PIv vs W_Y2
+
+```{r sens-10e}
+print(sensitivity$s10, n = Inf)
+```
+
+## 10f. Table S15 equivalent — directional vs W_Y2
+
+```{r sens-10f}
+print(sensitivity$s15, n = Inf)
+```
+
+## 10g. Table S16 equivalent — PIv vs deltaW
+
+```{r sens-10g}
+print(sensitivity$s16, n = Inf)
+```
+
+## 10h. Table S17 equivalent — directional vs deltaW
+
+```{r sens-10h}
+print(sensitivity$s17, n = Inf)
 ```
 
 # 11. Comparison: primary vs sensitivity
