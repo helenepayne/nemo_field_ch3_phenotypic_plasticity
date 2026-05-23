@@ -252,7 +252,7 @@ rank_cor_years <- purrr::map_dfr(SITES, function(site) {
 rank_cor_years
 ```
 
-# 4. Year effects on mean trait values (Eq. 3)
+# 4. Year effects on mean trait values (Table S8, Eq. 3)
 
 For each trait × site we fit `trait ~ Year + (1|Donor) + (1|Recipient)`,
 report Year fixed-effect estimates and marginal/conditional R².
@@ -280,7 +280,7 @@ year_lmm_results <- purrr::map_dfr(SITES, function(site) {
 year_lmm_results
 ```
 
-# 5. Genotype × Year interactions (Eq. 4, Figure 7)
+# 5. Genotype × Year interactions (Table S9 / Manuscript Table 4, Eq. 4, Figure 7)
 
 The null model is Eq. 3; the full model adds `(1|Donor:Year)`. The
 significance of the `Donor:Year` variance component is assessed with a
@@ -654,19 +654,19 @@ primary <- run_W_analyses(W_aster, plasticity,
 print(primary$dir_meanW_cor, n = Inf)
 ```
 
-## 9b. Eq. 5 — W_Y2 ~ W_Y1 + directional
+## 9b. Table S11 / Eq. 5 — W_Y2 ~ W_Y1 + directional
 
 ```{r primary-9b}
 print(primary$eq5, n = Inf)
 ```
 
-## 9c. Eq. 6 — deltaW ~ mean_W + directional
+## 9c. Table S13 / Eq. 6 — deltaW ~ mean_W + directional
 
 ```{r primary-9c}
 print(primary$eq6, n = Inf)
 ```
 
-## 9d. Eq. 7/8 — deltaW ~ PIv
+## 9d. Table S14 / Eq. 7/8 — deltaW ~ PIv
 
 ```{r primary-9d}
 print(primary$eq78, n = Inf)
@@ -1110,20 +1110,20 @@ wt(piv_by_trait, "S6_piv_by_trait.csv")
 # §3 — Rank correlations between years (Table S7)
 wt(rank_cor_years, "S7_rank_cor_years.csv")
 
-# §4 — Year LMM fixed effects (Eq. 3)
-wt(year_lmm_results, "year_lmm_results.csv")
+# §4 — Year LMM fixed effects (Table S8, Eq. 3)
+wt(year_lmm_results, "S8_year_lmm_results.csv")
 
 # §5 — G×Y LRT (Eq. 4)
 wt(gxy_lrt, "gxy_lrt.csv")
 
-# §5 — G×Y variance components (raw)
-wt(gxy_varcomp, "gxy_varcomp.csv")
+# §5 — G×Y variance components (Table S9 / Manuscript Table 4)
+wt(gxy_varcomp, "S9_gxy_varcomp.csv")
 
 # §9 PRIMARY — aster sire-effect fitness
 wt(primary$dir_meanW_cor, "S12_primary_dir_meanW_cor.csv")
-wt(primary$eq5,           "primary_eq5.csv")
-wt(primary$eq6,           "primary_eq6.csv")
-wt(primary$eq78,          "primary_eq78.csv")
+wt(primary$eq5,           "S11_primary_eq5_dir_W_Y2_lm.csv")
+wt(primary$eq6,           "S13_primary_eq6_dir_deltaW_lm.csv")
+wt(primary$eq78,          "S14_primary_eq78_piv_deltaW_lm.csv")
 wt(primary$s10,           "S10_primary_piv_W_Y2.csv")
 wt(primary$s15,           "S15_primary_dir_W_Y2.csv")
 wt(primary$s16,           "S16_primary_piv_deltaW.csv")
