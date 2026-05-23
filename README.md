@@ -1,7 +1,6 @@
 # nemo_field_ch3_phenotypic_plasticity
 
-Chapter 3 analysis code for the *Nemophila menziesii* common-garden field
-experiment: phenotypic plasticity and GxE in four California populations.
+Chapter 3 analysis code for the magnitude, direction, and fitness consequences of plasticity in four functional traits (specific leaf area, δ¹³C, mean seed mass, and corolla diameter) in two environmentally distinct years in four pedigreed populations (Angelo Coast, Bodega Bay, Blue Oak, and Hastings Reserve) of the California annual wildflower *Nemophila menziesii*
 
 ## Data dependencies
 
