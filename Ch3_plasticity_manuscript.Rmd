@@ -1,0 +1,616 @@
+---
+title: "Chapter 3: Plasticity of functional traits and its evolutionary constraints in *Nemophila menziesii*"
+author: "Helen E. Payne"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+This R Markdown reproduces the analyses reported in *Chapter 3:
+Plasticity of functional traits and its evolutionary constraints in*
+Nemophila menziesii. Section numbers follow the Methods/Resuload_site_traitslts
+structure of the manuscript; equations (Eq. 1–8) refer to the manuscript
+equations. Four pedigreed populations are analysed in parallel: Angelo
+Coast (AC), Bodega Bay (BB), Blue Oak (BO), and Hastings Reserve (HR).
+
+# Setup
+
+```{r libraries}
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(performance)
+library(broom)
+library(broom.mixed)
+library(patchwork)
+library(here)
+```
+
+```{r constants}
+SITES  <- c("AC", "BB", "BO", "HR")
+TRAITS <- c("corolla_diam_mm_SEG", "SLA_SEG", "d13C_SEG", "msm_all")
+# PIv (Eq. 1) is undefined for traits on a signed/negative scale (δ13C ≈ -25‰);
+# normalization by |max| produces scale-dependent values that are not comparable
+# across populations. Directional plasticity (Eq. 2) is used for δ13C instead.
+PIv_TRAITS <- setdiff(TRAITS, "d13C_SEG")
+TRAIT_LABELS <- c(
+  corolla_diam_mm_SEG = "corolla diameter (mm)",
+  SLA_SEG             = "specific leaf area (mm²/mg)",
+  d13C_SEG            = "δ13C (‰)",
+  msm_all             = "mean seed mass (mg)"
+)
+```
+
+# 1. Data loading and trait preparation
+
+The 2022 compiledsheet contains only Generation 1 plants; in 2023 we
+restrict to `Gen == "G1"` so the comparison matches Year 1. We retain
+only designated fitness plants (`F_plant == TRUE`).
+
+```{r load-site}
+load_site_traits <- function(site) {
+  d22 <- read_csv(
+    here("data_sheets/compiled_sheets",
+         paste0(site, "_compiledsheet_full_2022.csv")),
+    show_col_types = FALSE) %>%
+    dplyr::select(Donor, Recipient, F_plant, all_of(TRAITS)) %>%
+    mutate(Year = "2022", Site = site)
+
+  d23 <- read_csv(
+    here("data_sheets/compiled_sheets",
+         paste0(site, "_compiledsheet_full_2023.csv")),
+    show_col_types = FALSE) %>%
+    filter(Gen == "G1") %>%
+    dplyr::select(Donor, Recipient, F_plant, all_of(TRAITS)) %>%
+    mutate(Year = "2023", Site = site)
+
+  bind_rows(d22, d23) %>%
+    filter(F_plant == TRUE) %>%
+    mutate(Site = factor(Site, levels = SITES),
+           Year = factor(Year, levels = c("2022", "2023")))
+}
+
+site_data <- set_names(purrr::map(SITES, load_site_traits), SITES)
+walk2(SITES, site_data, ~ cat(.x, ":", nrow(.y), "rows\n"))
+```
+
+# 2. Trait-specific plasticity (PIv, PImd, directional)
+
+Per-family per-trait means are the foundation for every plasticity
+metric. PIv (Eq. 1) is the relative range of family means across the
+two years. PImd is the median-based analogue (used as a robustness
+check). Directional plasticity (Eq. 2) is the signed proportional change
+from Year 1 to Year 2.
+
+```{r plasticity-fns}
+family_means <- function(d) {
+  d %>%
+    group_by(Donor, Year) %>%
+    summarise(across(all_of(TRAITS), ~ mean(.x, na.rm = TRUE),
+                     .names = "{.col}"),
+              .groups = "drop") %>%
+    pivot_longer(all_of(TRAITS), names_to = "Trait", values_to = "mean")
+}
+
+family_medians <- function(d) {
+  d %>%
+    pivot_longer(all_of(TRAITS), names_to = "Trait", values_to = "value") %>%
+    group_by(Donor, Year, Trait) %>%
+    summarise(median = median(value, na.rm = TRUE), .groups = "drop")
+}
+
+compute_PIv <- function(fam_means) {           # Eq. 1
+  fam_means %>%
+    group_by(Donor, Trait) %>%
+    summarise(max_mean = max(mean, na.rm = TRUE),
+              min_mean = min(mean, na.rm = TRUE),
+              PIv      = (max_mean - min_mean) / abs(max_mean),
+              .groups  = "drop")
+}
+
+compute_PImd <- function(fam_medians) {
+  fam_medians %>%
+    group_by(Donor, Trait) %>%
+    summarise(PImd = (max(median, na.rm = TRUE) - min(median, na.rm = TRUE)) /
+                       abs(max(median, na.rm = TRUE)),
+              .groups = "drop")
+}
+
+compute_directional <- function(fam_means) {   # Eq. 2
+  fam_means %>%
+    pivot_wider(names_from = Year, values_from = mean,
+                names_prefix = "Y") %>%
+    mutate(directional = (Y2023 - Y2022) / abs(Y2022)) %>%
+    dplyr::select(Donor, Trait, directional, Y2022, Y2023)
+}
+
+plasticity <- purrr::map(site_data, function(d) {
+  fm   <- family_means(d)
+  fmed <- family_medians(d)
+  list(
+    fam_means    = fm,
+    PIv          = compute_PIv(fm),
+    PImd         = compute_PImd(fmed),
+    directional  = compute_directional(fm)
+  )
+})
+
+# Mean directional plasticity across all 4 traits per family (multivariate
+# directional), used in Figure 8 and Eqs 5/6 multivariate panels.
+mean_directional_by_family <- purrr::map_dfr(SITES, function(site) {
+  plasticity[[site]]$directional %>%
+    group_by(Donor) %>%
+    summarise(mean_directional = mean(directional, na.rm = TRUE),
+              .groups = "drop") %>%
+    mutate(Site = site, .before = 1)
+})
+```
+
+## PIv vs PImd robustness check (Table S4)
+
+```{r piv-pimd-cor}
+piv_pimd_cor <- purrr::map_dfr(SITES, function(site) {
+  x <- plasticity[[site]]
+  inner_join(x$PIv %>% filter(Trait %in% PIv_TRAITS),
+             x$PImd %>% filter(Trait %in% PIv_TRAITS),
+             by = c("Donor", "Trait")) %>%
+    group_by(Trait) %>%
+    summarise(n   = n(),
+              r   = cor(PIv, PImd, use = "complete.obs"),
+              p   = cor.test(PIv, PImd)$p.value,
+              .groups = "drop") %>%
+    mutate(Site = site, .before = 1)
+})
+piv_pimd_cor
+```
+
+# 3. Comparing trait-specific plasticity (Table S6)
+
+Trait-level mean PIv (across paternal families) summarises how plastic
+each trait is on average in each population. The one-sample t-test
+evaluates whether PIv differs from zero.
+
+```{r piv-by-trait}
+piv_by_trait <- purrr::map_dfr(SITES, function(site) {
+  plasticity[[site]]$PIv %>%
+    filter(Trait %in% PIv_TRAITS) %>%
+    group_by(Trait) %>%
+    summarise(n        = n(),
+              mean_PIv = mean(PIv, na.rm = TRUE),
+              sd_PIv   = sd(PIv,   na.rm = TRUE),
+              se_PIv   = sd_PIv / sqrt(n),
+              t        = t.test(PIv, mu = 0)$statistic,
+              p        = t.test(PIv, mu = 0)$p.value,
+              .groups  = "drop") %>%
+    mutate(Site = site, .before = 1)
+})
+piv_by_trait
+```
+
+# 4. Year effects on mean trait values (Eq. 3)
+
+For each trait × site we fit `trait ~ Year + (1|Donor) + (1|Recipient)`,
+report Year fixed-effect estimates and marginal/conditional R².
+
+```{r year-lmm}
+fit_year_lmm <- function(d, trait) {
+  f <- as.formula(paste0(trait, " ~ Year + (1|Donor) + (1|Recipient)"))
+  lmer(f, data = d, REML = FALSE)
+}
+
+year_lmm_results <- purrr::map_dfr(SITES, function(site) {
+  purrr::map_dfr(TRAITS, function(tr) {
+    m <- fit_year_lmm(site_data[[site]], tr)
+    r <- suppressWarnings(performance::r2(m))
+    fe <- broom.mixed::tidy(m, effects = "fixed") %>%
+      filter(term == "Year2023")
+    tibble(Site = site, Trait = tr,
+           estimate = fe$estimate, std.error = fe$std.error,
+           p_Year   = fe$p.value,
+           R2m      = as.numeric(r$R2_marginal),
+           R2c      = as.numeric(r$R2_conditional),
+           n        = nobs(m))
+  })
+})
+year_lmm_results
+```
+
+# 5. Genotype × Year interactions (Eq. 4, Figure 7)
+
+The null model is Eq. 3; the full model adds `(1|Donor:Year)`. The
+significance of the `Donor:Year` variance component is assessed with a
+REML likelihood ratio test; the p-value is halved to correct for testing
+on the boundary (H₀: σ² = 0; Self & Liang 1987).  Both models are fit
+with REML; variance components are drawn from the REML full model.
+
+```{r gxy-lmm}
+fit_gxy <- function(d, trait) {
+  fn <- as.formula(paste0(trait, " ~ Year + (1|Donor) + (1|Recipient)"))
+  fg <- as.formula(paste0(trait,
+                          " ~ Year + (1|Donor) + (1|Recipient) + (1|Donor:Year)"))
+  null <- lmer(fn, data = d, REML = TRUE)
+  full <- lmer(fg, data = d, REML = TRUE)
+  list(null = null, full = full,
+       lrt_reml = anova(null, full, refit = FALSE))
+}
+
+gxy_models <- purrr::map(SITES, function(site) {
+  set_names(purrr::map(TRAITS, ~ fit_gxy(site_data[[site]], .x)), TRAITS)
+}) %>% set_names(SITES)
+
+# REML LRT summary with boundary-corrected p (halved)
+gxy_lrt <- purrr::map_dfr(SITES, function(site) {
+  purrr::map_dfr(TRAITS, function(tr) {
+    a <- gxy_models[[site]][[tr]]$lrt_reml
+    tibble(Site = site, Trait = tr,
+           chisq = a$Chisq[2],
+           p_boundary = a$`Pr(>Chisq)`[2] / 2)
+  })
+})
+gxy_lrt
+
+# Variance components as % of total variance (input to Figure 7)
+gxy_varcomp <- purrr::map_dfr(SITES, function(site) {
+  purrr::map_dfr(TRAITS, function(tr) {
+    vc <- as.data.frame(VarCorr(gxy_models[[site]][[tr]]$full))
+    vc$percent <- 100 * vc$vcov / sum(vc$vcov)
+    vc %>% mutate(Site = site, Trait = tr, .before = 1) %>%
+      dplyr::select(Site, Trait, grp, vcov, sdcor, percent)
+  })
+})
+gxy_varcomp
+```
+
+# 6. Multivariate plasticity (mean z-scored PIv across traits per family)
+
+```{r mean-piv-family}
+mean_PIv_by_family <- purrr::map_dfr(SITES, function(site) {
+  plasticity[[site]]$PIv %>%
+    filter(Trait %in% PIv_TRAITS) %>%
+    group_by(Trait) %>%
+    mutate(PIv_z = as.numeric(scale(PIv))) %>%   # z-score within site × trait
+    ungroup() %>%
+    group_by(Donor) %>%
+    summarise(mean_PIv = mean(PIv_z, na.rm = TRUE), .groups = "drop") %>%
+    mutate(Site = site, .before = 1)
+})
+mean_PIv_by_family
+```
+
+# 7. Paternal-family breeding values for fitness (W)
+
+We load the BLUP-on-the-mean-value-scale breeding values produced by the
+aster analyses (`chapter_1_adaptive_capacity/aster/Aster6_*.Rmd` → `chapter_1_adaptive_capacity/aster/processed_data/`). Each
+file has columns `X` (encoded as `…Donor<ID>`) and `bhat.Donor.mu` (the
+breeding value on the seeds scale).
+
+```{r load-BV}
+read_BV <- function(site, year) {
+  fpath <- here("chapter_1_adaptive_capacity", "aster", "processed_data",
+                paste0(site, year, "_bhat.Donor.mu.csv"))
+  d <- read.csv(fpath, stringsAsFactors = FALSE,
+                check.names = FALSE)  # base R keeps "" as "V1"
+  colnames(d)[1] <- "raw"
+  colnames(d)[2] <- "BV_W"
+  d %>%
+    as_tibble() %>%
+    mutate(Donor = sub(".*Donor", "", raw),
+           Site  = site, Year = paste0("20", year)) %>%
+    dplyr::select(Site, Year, Donor, BV_W)
+}
+
+BV_W <- purrr::map_dfr(SITES, ~ bind_rows(read_BV(.x, "22"), read_BV(.x, "23")))
+BV_wide <- BV_W %>%
+  pivot_wider(names_from = Year, values_from = BV_W,
+              names_prefix = "BV_W_") %>%
+  mutate(deltaW   = BV_W_2023 - BV_W_2022,
+         mean_BV  = rowMeans(across(c(BV_W_2022, BV_W_2023)), na.rm = TRUE))
+BV_wide
+```
+
+# 8. Plasticity vs fitness (Eq. 5, Figure 8, Table S12)
+
+## 8a. Pearson correlations: directional plasticity vs mean W (Figure 8)
+
+```{r dir-vs-meanW}
+# Per-trait directional plasticity vs mean W
+dir_meanW_cor <- purrr::map_dfr(SITES, function(site) {
+  d <- plasticity[[site]]$directional %>%
+    inner_join(filter(BV_wide, Site == site), by = "Donor")
+  purrr::map_dfr(TRAITS, function(tr) {
+    sub <- filter(d, Trait == tr)
+    ct  <- with(sub, cor.test(directional, mean_BV))
+    tibble(Site = site, Trait = tr,
+           n = sum(complete.cases(sub$directional, sub$mean_BV)),
+           r = unname(ct$estimate), p = ct$p.value)
+  })
+})
+
+# Multivariate directional plasticity vs mean W (Figure 8 multivariate panel)
+dir_meanW_multi <- purrr::map_dfr(SITES, function(site) {
+  d <- filter(mean_directional_by_family, Site == site) %>%
+    inner_join(filter(BV_wide, Site == site), by = "Donor")
+  ct <- with(d, cor.test(mean_directional, mean_BV))
+  tibble(Site = site, Trait = "multivariate",
+         n = sum(complete.cases(d$mean_directional, d$mean_BV)),
+         r = unname(ct$estimate), p = ct$p.value)
+})
+
+dir_meanW_cor <- bind_rows(dir_meanW_cor, dir_meanW_multi) %>%
+  arrange(Site, Trait)
+dir_meanW_cor
+```
+
+## 8b. Eq. 5: W_Year2 ~ W_Year1 + directional_plasticity
+
+For each trait × site we test whether Year-2 fitness depends on
+directional plasticity after controlling for Year-1 fitness.
+
+```{r eq5}
+# Per-trait: W_Y2 ~ W_Y1 + directional
+eq5_results <- purrr::map_dfr(SITES, function(site) {
+  bw <- filter(BV_wide, Site == site)
+  pl <- plasticity[[site]]$directional
+  purrr::map_dfr(TRAITS, function(tr) {
+    d <- pl %>% filter(Trait == tr) %>% inner_join(bw, by = "Donor")
+    m <- lm(BV_W_2023 ~ BV_W_2022 + directional, data = d)
+    tdy <- broom::tidy(m) %>% filter(term == "directional")
+    tibble(Site = site, Trait = tr,
+           n = nobs(m),
+           beta_plast = tdy$estimate, p_plast = tdy$p.value,
+           R2 = summary(m)$r.squared)
+  })
+})
+
+# Multivariate: W_Y2 ~ W_Y1 + mean_directional
+eq5_multi <- purrr::map_dfr(SITES, function(site) {
+  bw <- filter(BV_wide, Site == site)
+  d  <- filter(mean_directional_by_family, Site == site) %>%
+    inner_join(bw, by = "Donor")
+  m  <- lm(BV_W_2023 ~ BV_W_2022 + mean_directional, data = d)
+  tdy <- broom::tidy(m) %>% filter(term == "mean_directional")
+  tibble(Site = site, Trait = "multivariate",
+         n = nobs(m),
+         beta_plast = tdy$estimate, p_plast = tdy$p.value,
+         R2 = summary(m)$r.squared)
+})
+
+eq5_results <- bind_rows(eq5_results, eq5_multi) %>% arrange(Site, Trait)
+eq5_results
+```
+
+# 9. ΔW vs plasticity (Eq. 6, Eq. 7, Eq. 8)
+
+## 9a. Eq. 6: ΔW ~ W + directional_plasticity
+
+Per-trait test of whether directional plasticity predicts ΔW once
+mean parental performance (`mean_BV`) is partialled out.
+
+```{r eq6}
+# Per-trait: deltaW ~ mean_BV + directional
+eq6_results <- purrr::map_dfr(SITES, function(site) {
+  bw <- filter(BV_wide, Site == site)
+  pl <- plasticity[[site]]$directional
+  purrr::map_dfr(TRAITS, function(tr) {
+    d <- pl %>% filter(Trait == tr) %>% inner_join(bw, by = "Donor")
+    m <- lm(deltaW ~ mean_BV + directional, data = d)
+    tdy <- broom::tidy(m) %>% filter(term == "directional")
+    tibble(Site = site, Trait = tr,
+           n = nobs(m),
+           beta_plast = tdy$estimate, p_plast = tdy$p.value,
+           R2 = summary(m)$r.squared)
+  })
+})
+
+# Multivariate: deltaW ~ mean_BV + mean_directional
+eq6_multi <- purrr::map_dfr(SITES, function(site) {
+  bw <- filter(BV_wide, Site == site)
+  d  <- filter(mean_directional_by_family, Site == site) %>%
+    inner_join(bw, by = "Donor")
+  m  <- lm(deltaW ~ mean_BV + mean_directional, data = d)
+  tdy <- broom::tidy(m) %>% filter(term == "mean_directional")
+  tibble(Site = site, Trait = "multivariate",
+         n = nobs(m),
+         beta_plast = tdy$estimate, p_plast = tdy$p.value,
+         R2 = summary(m)$r.squared)
+})
+
+eq6_results <- bind_rows(eq6_results, eq6_multi) %>% arrange(Site, Trait)
+eq6_results
+```
+
+## 9b. Eq. 7 / Eq. 8: ΔW ~ mean_PIv (with quadratic check)
+
+We fit a linear and a quadratic model per site and report the quadratic
+term's p-value as well as the linear-model summary; per the manuscript,
+we report the simplified linear model (Eq. 8) when the quadratic term
+is non-significant.
+
+```{r eq7-eq8}
+run_piv_lm <- function(d, piv_col) {
+  f_lin  <- as.formula(paste0("deltaW ~ ", piv_col))
+  f_quad <- as.formula(paste0("deltaW ~ ", piv_col, " + I(", piv_col, "^2)"))
+  m_lin  <- lm(f_lin,  data = d)
+  m_quad <- lm(f_quad, data = d)
+  q <- broom::tidy(m_quad) %>% filter(grepl("\\^2", term))
+  l <- broom::tidy(m_lin)  %>% slice(2)
+  tibble(n       = nobs(m_lin),
+         p_quad  = q$p.value,
+         beta_lin = l$estimate,
+         p_lin   = l$p.value,
+         R2_lin  = summary(m_lin)$r.squared,
+         R2_quad = summary(m_quad)$r.squared)
+}
+
+# Per-trait PIv: ΔW ~ PIv (linear + quadratic check)
+# d13C excluded — PIv is not meaningful for traits on a signed/negative scale.
+eq78_by_trait <- purrr::map_dfr(SITES, function(site) {
+  bw  <- filter(BV_wide, Site == site)
+  piv <- plasticity[[site]]$PIv
+  purrr::map_dfr(PIv_TRAITS, function(tr) {
+    d <- piv %>% filter(Trait == tr) %>%
+      inner_join(bw, by = "Donor")
+    run_piv_lm(d, "PIv") %>% mutate(Site = site, Trait = tr, .before = 1)
+  })
+})
+
+# Multivariate PIv: ΔW ~ mean_PIv (linear + quadratic check)
+eq78_multivar <- purrr::map_dfr(SITES, function(site) {
+  d <- inner_join(filter(BV_wide, Site == site),
+                  filter(mean_PIv_by_family, Site == site),
+                  by = c("Site", "Donor"))
+  run_piv_lm(d, "mean_PIv") %>%
+    mutate(Site = site, Trait = "multivariate", .before = 1)
+})
+
+eq78_results <- bind_rows(eq78_by_trait, eq78_multivar) %>% arrange(Site, Trait)
+eq78_results
+```
+
+# 10. Figures
+
+## Figure 5: Trait reaction norms per population
+
+Each line is one paternal family; line colour distinguishes whether the
+trait increased or decreased from Year 1 to Year 2.
+
+```{r fig5, fig.width=9, fig.height=10}
+reaction_norm_plot <- function(site) {
+  fm <- plasticity[[site]]$fam_means
+  dir <- fm %>%
+    pivot_wider(names_from = Year, values_from = mean,
+                names_prefix = "Y") %>%
+    mutate(dir = if_else(Y2023 > Y2022, "increase", "decrease")) %>%
+    dplyr::select(Donor, Trait, dir)
+
+  plot_df <- fm %>%
+    left_join(dir, by = c("Donor", "Trait")) %>%
+    mutate(Trait_lab = recode(Trait, !!!TRAIT_LABELS))
+
+  ggplot(plot_df,
+         aes(Year, mean, group = Donor, colour = dir)) +
+    geom_line(alpha = 0.5) + geom_point(size = 1) +
+    facet_wrap(~ Trait_lab, scales = "free_y", ncol = 2) +
+    scale_colour_manual(values = c(increase = "#1f78b4",
+                                   decrease = "#e31a1c"),
+                        name = NULL) +
+    labs(title = paste0(site, " — paternal-family reaction norms"),
+         x = NULL, y = "Family mean") +
+    theme_bw() +
+    theme(legend.position = "top",
+          strip.background = element_blank())
+}
+
+fig5 <- wrap_plots(purrr::map(SITES, reaction_norm_plot), ncol = 2) +
+  plot_annotation(tag_levels = "A")
+fig5
+```
+
+## Figure 6: Multivariate plasticity trajectories (SLA × δ13C)
+
+```{r fig6, fig.width=10, fig.height=8}
+multivar_trajectory <- function(site) {
+  fm <- plasticity[[site]]$fam_means %>%
+    filter(Trait %in% c("SLA_SEG", "d13C_SEG")) %>%
+    pivot_wider(names_from = Trait, values_from = mean)
+
+  ggplot(fm, aes(SLA_SEG, d13C_SEG, group = Donor, colour = Year)) +
+    geom_path(arrow = arrow(length = unit(2, "mm"), type = "closed"),
+              alpha = 0.6) +
+    geom_point(size = 1.4) +
+    labs(title = site, x = "SLA (mm²/mg)", y = "δ13C (‰)") +
+    theme_bw()
+}
+
+fig6 <- wrap_plots(purrr::map(SITES, multivar_trajectory), ncol = 2) +
+  plot_annotation(tag_levels = "A")
+fig6
+```
+
+## Figure 7: Variance partitioning (G, M, G×Y, Year, residual)
+
+Stacked bars of variance-component percentages from the full G×Y model
+(`gxy_varcomp`) for each trait × site.
+
+```{r fig7, fig.width=10, fig.height=6}
+varcomp_labels <- c(`Donor:Year` = "Donor × Year (G × Y)",
+                    Donor        = "Donor (G)",
+                    Recipient    = "Recipient (M)",
+                    Residual     = "Residual")
+
+fig7 <- gxy_varcomp %>%
+  mutate(Component = recode(grp, !!!varcomp_labels),
+         Component = factor(Component, levels = unname(varcomp_labels)),
+         Trait_lab = recode(Trait, !!!TRAIT_LABELS),
+         Site      = factor(Site, levels = SITES)) %>%
+  ggplot(aes(Site, percent, fill = Component)) +
+  geom_col(position = "stack", width = 0.7) +
+  facet_wrap(~ Trait_lab, ncol = 2) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(y = "Variance explained (%)", x = NULL) +
+  theme_bw() + theme(legend.position = "bottom")
+fig7
+```
+
+## Figure 8: Directional plasticity vs mean fitness
+
+```{r fig8, fig.width=12, fig.height=10}
+# Significance threshold for drawing regression lines (blue = p < 0.05)
+sig_traits <- dir_meanW_cor %>% filter(p < 0.05) %>%
+  mutate(key = paste(Site, Trait))
+
+dir_meanW_plot <- function(site) {
+  # Per-trait directional plasticity
+  d_trait <- plasticity[[site]]$directional %>%
+    inner_join(filter(BV_wide, Site == site), by = "Donor") %>%
+    mutate(Trait_lab = recode(Trait, !!!TRAIT_LABELS),
+           x = directional)
+
+  # Multivariate directional
+  d_multi <- filter(mean_directional_by_family, Site == site) %>%
+    inner_join(filter(BV_wide, Site == site) %>%
+                 dplyr::select(Donor, mean_BV),
+               by = "Donor") %>%
+    mutate(Trait = "multivariate", Trait_lab = "Multivariate", x = mean_directional) %>%
+    dplyr::select(Site, Donor, Trait, Trait_lab, x, mean_BV)
+
+  d <- bind_rows(
+    d_trait %>% dplyr::select(Site, Donor, Trait, Trait_lab, x, mean_BV),
+    d_multi
+  ) %>%
+    mutate(Trait_lab = factor(Trait_lab,
+                               levels = c("Multivariate", unname(TRAIT_LABELS))),
+           sig = paste(site, Trait) %in% sig_traits$key)
+
+  ggplot(d, aes(x, mean_BV)) +
+    geom_point(alpha = 0.7, size = 1.2) +
+    geom_smooth(data = filter(d, sig),
+                method = "lm", se = TRUE, colour = "steelblue") +
+    facet_wrap(~ Trait_lab, scales = "free_x", ncol = 3) +
+    labs(title = site,
+         x = "Directional plasticity (Year 1 → Year 2)",
+         y = expression(bar(W) ~ "(paternal-family mean fitness)")) +
+    theme_bw() +
+    theme(strip.background = element_blank())
+}
+
+fig8 <- wrap_plots(purrr::map(SITES, dir_meanW_plot), ncol = 2) +
+  plot_annotation(tag_levels = "A")
+fig8
+```
+
+# Session info
+
+```{r}
+sessionInfo()
+```

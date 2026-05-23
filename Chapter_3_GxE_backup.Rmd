@@ -1,0 +1,4509 @@
+---
+title: "Chapter_3_GxE_backup"
+author: "Helen Payne"
+date: "2026-01-09"
+output: html_document
+---
+
+\-\-- title: "Ch3_GxE" author: "Helen Payne" date: "2025-12-03" output: html_document editor_options: markdown: wrap: 72 \-\--
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load libraries
+
+```{r}
+library(tidyverse)
+```
+
+# ANGELO COAST
+
+Read in the data
+
+```{r}
+AC_22 <- read_csv(here::here("data_sheets/compiled_sheets/AC_compiledsheet_full_2022.csv"))
+AC_23 <- read_csv(here::here("data_sheets/compiled_sheets/AC_compiledsheet_full_2023.csv"))
+```
+
+Create a dataset
+
+```{r}
+ac22_trait <- AC_22 %>%
+  select(Donor, Recipient, F_plant, corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all) %>% #including maternal and paternal parents
+  mutate(Year = "2022") #adding year column
+
+ac23_trait <- AC_23 %>%
+  filter(Gen == "G1") %>%    # just include generation 1
+  select(Donor, Recipient, F_plant, corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all) %>% #including maternal and paternal parents
+  mutate(Year = "2023") #adding year column
+
+# combine years
+ac_traits <- bind_rows(ac22_trait, ac23_trait) %>%
+  filter(F_plant == "TRUE")
+```
+
+Get paternal family means
+
+```{r}
+fam_means <- ac_traits %>%
+  group_by(Donor, Year) %>% #all calculations done separately for each paternal family within each year
+  summarise(
+    across(
+      c(corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all),
+      ~ mean(.x, na.rm = TRUE), # get the family mean corolla diameter for each Donor × Year, remove NAs
+      .names = "mean_{.col}"
+    ),
+    .groups = "drop" #ungroups the results
+  )
+```
+
+Assign colors for Increasing and Decreasing
+
+```{r}
+dirs_wide <- fam_means %>%
+  pivot_wider(
+    names_from = Year,
+    values_from = starts_with("mean_"),
+    names_sep = "_"
+  ) %>%
+  mutate(
+    dir_corolla_diam_mm_SEG = if_else(mean_corolla_diam_mm_SEG_2023 >
+                                        mean_corolla_diam_mm_SEG_2022,
+                                      "increase", "decrease"),
+    dir_SLA_SEG  = if_else(mean_SLA_SEG_2023  > mean_SLA_SEG_2022,
+                           "increase", "decrease"),
+    dir_d13C_SEG = if_else(mean_d13C_SEG_2023 > mean_d13C_SEG_2022,
+                           "increase", "decrease"),
+    dir_msm_all  = if_else(mean_msm_all_2023  > mean_msm_all_2022,
+                           "increase", "decrease")
+  ) %>%
+  select(Donor, starts_with("dir_"))
+
+#Long format for plotting
+fam_long <- fam_means %>%
+  pivot_longer(
+    cols = starts_with("mean_"),
+    names_to  = "Trait",
+    values_to = "mean_value"
+  )
+
+dirs_long <- dirs_wide %>%
+  pivot_longer(
+    cols = starts_with("dir_"),
+    names_to  = "Trait",
+    values_to = "dir"
+  ) %>%
+  mutate(
+    Trait = case_when(
+      Trait == "dir_corolla_diam_mm_SEG" ~ "corolla diameter (mm)",
+      Trait == "dir_SLA_SEG"             ~ "specific leaf area (mm/mg)",
+      Trait == "dir_d13C_SEG"            ~ "δ13C (‰)",
+      Trait == "dir_msm_all"             ~ "seed mass (mg)",
+      TRUE ~ Trait
+    )
+  )
+```
+
+Plot the data
+
+```{r}
+plot_dat <- fam_long %>%
+  mutate(
+    Trait = case_when(
+      Trait == "mean_corolla_diam_mm_SEG" ~ "corolla diameter (mm)",
+      Trait == "mean_SLA_SEG"             ~ "specific leaf area (mm/mg)",
+      Trait == "mean_d13C_SEG"            ~ "δ13C (‰)",
+      Trait == "mean_msm_all"             ~ "seed mass (mg)",
+      TRUE ~ Trait
+    )
+  ) %>%
+  left_join(dirs_long, by = c("Donor", "Trait"))
+
+#One plot, all traits, blue = increase, red = decrease
+p <- ggplot(plot_dat,
+            aes(x = Year, y = mean_value,
+                group = Donor, color = dir)) +
+  geom_line(alpha = 0.9) +
+  geom_point(size = 2.5) +
+  scale_x_discrete(expand = c(0.05, 0)) +
+  scale_color_manual(
+    values = c(increase = "#2c7fb8", decrease = "#d95f0e"),
+    name   = "Change 2022 → 2023"
+  ) +
+  facet_wrap(~ Trait, scales = "free_y") +
+  labs(x = "Year", y = "AC paternal family mean") +
+  theme_bw(base_size = 18) +
+  theme(
+    legend.position = "bottom",
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 18),
+    axis.text.x  = element_text(size = 16),
+    axis.text.y  = element_text(size = 16)
+  )
+
+p
+
+ggsave("Figures/AC_reaction_norms_traits.jpeg", #save the plot
+       plot = p, width = 8, height = 6, dpi = 700)
+```
+
+Pivot the dataframe so each family shows trait means
+
+```{r}
+fam_wide <- fam_means %>%
+  tidyr::pivot_wider(
+    id_cols = Donor,
+    names_from = Year,
+    values_from = c(mean_corolla_diam_mm_SEG, mean_SLA_SEG, mean_d13C_SEG, mean_msm_all)
+  )
+```
+
+## **1. Is there plasticity in the traits of interest (corolla diameter, sla, d13C, msm)?**
+
+YES. Spearman's Rank Correlations. We will also observe plasticity using the plasticity index as well.
+
+```{r}
+# Spearman correlation for corolla area
+cor.test(fam_wide$mean_corolla_diam_mm_SEG_2022, fam_wide$mean_corolla_diam_mm_SEG_2023, method = "spearman")
+# 	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_corolla_diam_mm_SEG_2022 and fam_wide$mean_corolla_diam_mm_SEG_2023
+# S = 8882, p-value = 0.3025
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#       rho 
+# 0.1667917 
+
+
+# Spearman correlation for SLA
+cor.test(fam_wide$mean_SLA_SEG_2022, fam_wide$mean_SLA_SEG_2023, method = "spearman")
+# 	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_SLA_SEG_2022 and fam_wide$mean_SLA_SEG_2023
+# S = 6828, p-value = 0.2574
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#       rho 
+# 0.1906117 
+
+# Spearman correlation for d13C
+cor.test(fam_wide$mean_d13C_SEG_2022, fam_wide$mean_d13C_SEG_2023, method = "spearman")
+#	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_d13C_SEG_2022 and fam_wide$mean_d13C_SEG_2023
+# S = 7792, p-value = 0.1959
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#      rho 
+# 0.211336
+
+# Spearman correlation for msm
+cor.test(fam_wide$mean_msm_all_2022, fam_wide$mean_msm_all_2023, method = "spearman")
+
+# 	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_msm_all_2022 and fam_wide$mean_msm_all_2023
+# S = 7790, p-value = 0.1954
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#       rho 
+# 0.2115385
+```
+
+## **2. Do traits differ in how plastic they are, on average, across genotypes?**
+
+Calculate how much two traits differ from one another using PIv (Valladares et al., 2006):
+
+```{r}
+piv_df <- fam_long %>%
+  group_by(Donor, Trait) %>%
+  summarise(
+    max_mean = max(mean_value, na.rm = TRUE), #determine the maximum donor mean
+    min_mean = min(mean_value, na.rm = TRUE), #determine the minimum donor mean
+    PIv = (max_mean - min_mean) / max_mean, #calculate the PIv to determine how much traits differ from eachother
+    .groups = "drop"
+  )
+```
+
+Calculate plasticity by trait using PIv:
+
+```{r}
+mean_piv_by_trait <- piv_df %>%
+  group_by(Trait) %>%
+  summarise(mean_PIv = mean(PIv, na.rm = TRUE))
+
+# mean_SLA_SEG
+# 0.12840040
+
+# mean_corolla_diam_mm_SEG
+# 0.08422690
+
+# mean_d13C_SEG
+# -0.01515385
+
+# mean_msm_all
+# 0.15994703
+```
+
+Calculate how much traits differ from one another using Plmd (used for non-normal distributions):
+
+SLA and msm were slightly non-normal based on histograms earlier.
+
+```{r}
+
+ac_traits_long <- ac_traits %>%
+  pivot_longer(
+    cols = c(corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all),
+    names_to = "Trait",
+    values_to = "value"
+  )
+
+PImd_df <- ac_traits_long %>%
+  group_by(Donor, Trait, Year) %>%
+  summarise(
+    median_value = median(value, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+PImd_df <- PImd_df %>%
+  group_by(Donor, Trait) %>%
+  summarise(
+    max_median = max(median_value, na.rm = TRUE),
+    min_median = min(median_value, na.rm = TRUE),
+    PImd = (max_median - min_median) / max_median,
+    .groups = "drop"
+  )
+```
+
+Do traits differ in how plastic they are, on average, across genotypes? Calculate plasticity by trait:
+
+```{r}
+mean_PImd_by_trait <- PImd_df %>%
+  group_by(Trait) %>%
+  summarise(mean_PImd = mean(PImd, na.rm = TRUE))
+
+
+#SLA_SEG
+# 0.10921634
+# 
+# corolla_diam_mm_SEG
+# 0.09407846
+# 
+# d13C_SEG
+# -0.01753768
+# 
+# msm_all
+# 0.15127971
+```
+
+Comparing PIv and PImd:
+
+```{r}
+
+cor.test(mean_PImd_by_trait$mean_PImd, mean_piv_by_trait$mean_PIv)
+#Families ranked as highly plastic using PIv are also ranked as highly plastic using PImd
+
+# 	Pearson's product-moment correlation
+# 
+# data:  mean_PImd_by_trait$mean_PImd and mean_piv_by_trait$mean_PIv
+# t = 9.1336, df = 2, p-value = 0.01178
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  0.5402505 0.9997650
+# sample estimates:
+#       cor 
+# 0.9882242
+
+#Traits ranked as highly plastic using PIv are also ranked as highly plastic using PImd
+
+#PIv and PImd are esentially the same
+```
+
+## **3. Within each trait, do paternal families differ in their plastic responses (i.e., is there genetic variation for plasticity)?**
+
+Do paternal families differ in their plastic responses to corolla area?
+
+```{r}
+library(lme4)
+library(lmerTest)
+
+model <- lmer(corolla_diam_mm_SEG ~ Year * Donor + (1|Recipient), data = ac_traits)
+anova(model)
+
+# Type III Analysis of Variance Table with Satterthwaite's method
+#            Sum Sq Mean Sq NumDF  DenDF F value   Pr(>F)   
+# Year        62.82  62.818     1 329.56 10.4689 0.001337 **
+# Donor      388.58   9.964    39  76.16  1.6605 0.029776 * 
+# Year:Donor 320.56   8.220    39 319.11  1.3698 0.076932 . 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+shapiro.test(residuals(model))
+# 	Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.99558, p-value = 0.2707
+plot(model)
+hist(ac_traits$corolla_diam_mm_SEG) #normal
+```
+
+Do paternal families differ in their plastic responses to SLA?
+
+```{r}
+
+model <- lmer(SLA_SEG ~ Year * Donor + (1|Recipient), data = ac_traits)
+anova(model)
+# 
+# Type III Analysis of Variance Table with Satterthwaite's method
+#            Sum Sq Mean Sq NumDF  DenDF F value   Pr(>F)   
+# Year       205.43 205.431     1 323.98  8.1552 0.004571 **
+# Donor      812.25  20.827    39  61.95  0.8268 0.734852   
+# Year:Donor 814.30  22.619    36 314.31  0.8979 0.640354
+
+shapiro.test(residuals(model)) #not normal
+# 	Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.79037, p-value < 2.2e-16
+plot(model)
+hist(ac_traits$SLA_SEG) #not normal
+```
+
+Do paternal families differ in their plastic responses to d13C?
+
+```{r}
+
+model <- lmer(d13C_SEG ~ Year * Donor + (1|Recipient), data = ac_traits)
+anova(model)
+
+# Type III Analysis of Variance Table with Satterthwaite's method
+#            Sum Sq Mean Sq NumDF  DenDF F value    Pr(>F)    
+# Year       11.999 11.9993     1 362.92 25.9319 5.694e-07 ***
+# Donor      37.458  0.9605    39  57.87  2.0757  0.005692 ** 
+# Year:Donor 27.296  0.7183    38 350.33  1.5524  0.023198 *  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+shapiro.test(residuals(model))
+#	Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.99783, p-value = 0.8157
+plot(model)
+hist(ac_traits$d13C_SEG) #normal
+```
+
+Do paternal families differ in their plastic responses to msm?
+
+```{r}
+
+model <- lmer(msm_all ~ Year * Donor + (1|Recipient), data = ac_traits) #warning because there are a few missing datapoints, but its ok
+anova(model)
+
+#Type III Analysis of Variance Table with Satterthwaite's method
+#             Sum Sq Mean Sq NumDF  DenDF F value Pr(>F)
+# Year        0.0408 0.04081     1 338.31  0.1018 0.7498
+# Donor      18.9839 0.48677    39  65.97  1.2145 0.2399
+# Year:Donor 16.4686 0.43338    38 334.84  1.0813 0.3483
+
+shapiro.test(residuals(model))
+
+plot(model)
+hist(ac_traits$msm_all) #normal
+```
+
+## **4. Across traits, are some paternal families consistently more plastic than others?**
+
+Calculate the overall multivariate plasticity using PIv:
+
+```{r}
+mean_piv_by_family <- piv_df %>%
+  group_by(Donor) %>%
+  summarise(mean_PIv = mean(PIv, na.rm = TRUE))
+```
+
+Calculate the overall multivariate plasticity using PImd:
+
+```{r}
+mean_PImd_by_family <- PImd_df %>%
+  group_by(Donor) %>%
+  summarise(mean_PImd = mean(PImd, na.rm = TRUE))
+```
+
+Compare and Contrast PImd and PIv:
+
+```{r}
+cor.test(mean_PImd_by_family$mean_PImd, mean_piv_by_family$mean_PIv)
+
+# 	Pearson's product-moment correlation
+# 
+# data:  mean_PImd_by_family$mean_PImd and mean_piv_by_family$mean_PIv
+# t = 6.655, df = 38, p-value = 7.231e-08
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  0.5471672 0.8507222
+# sample estimates:
+#       cor 
+# 0.7336309 
+
+#Families ranked as highly plastic using PIv are also ranked as highly plastic using PImd
+```
+
+## **5. How is a paternal family's trait-specific plasticity as well as it's cross-trait (average) plasticity associated with breeding values for fitness?**
+
+```{r}
+
+AC22_BV<-read.csv("/Users/Helen/Desktop/nemo_field/aster/processed_data/AC22_bhat.Donor.mu.csv")
+AC22_BV <- AC22_BV %>%
+  rename(Donor = X) %>% 
+  rename(BV_W = bhat.Donor.mu) %>% 
+  mutate(Donor = sub(".*Donor", "", Donor))
+
+
+AC23_BV<-read.csv("/Users/Helen/Desktop/nemo_field/aster/processed_data/AC23_bhat.Donor.mu.csv")
+AC23_BV <- AC23_BV %>%
+  rename(Donor = X) %>%   
+  rename(BV_W = bhat.donor.mu) %>% 
+  mutate(Donor = sub(".*Donor", "", Donor))
+
+```
+
+Merged the two datasets by Donor for 2022
+
+```{r}
+merged <- AC22_BV %>%
+  select(Donor, BV_W) %>%       # keep only relevant columns
+  inner_join(mean_piv_by_family %>% 
+               select(Donor, mean_PIv),
+             by = "Donor")
+```
+
+See if BV(W) and Plasticity are correlated for 2022
+
+```{r}
+cor_pearson <- cor(merged$BV_W, merged$mean_PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged$BV_W, merged$mean_PIv)
+
+# 	Pearson's product-moment correlation
+# 
+# data:  merged$BV_W and merged$mean_PIv
+# t = -0.90835, df = 38, p-value = 0.3694
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.4374244  0.1736142
+# sample estimates:
+#        cor 
+# -0.1457792 
+```
+
+Make a scatterplot of Breeding value for Fitness and mean absolute plasticity for 2022
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# --- Merge datasets by Donor ---
+merged <- AC22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+   mean_piv_by_family %>% select(Donor, mean_PIv),
+    by = "Donor"
+  )
+
+# --- Scatterplot ---
+p <- ggplot(merged, aes(x = mean_PIv, y = BV_W)) +
+  geom_point(size = 3, alpha = 0.8) +
+  labs(
+    x = "Overall Plasticity",
+    y = "AC BV(W) 2022"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.title = element_text(face = "bold")
+  )
+
+print(p)
+
+ggsave("Figures/AC_BV(W)2022_plasticity.jpeg", #save the plot
+       plot = p, width = 8, height = 6, dpi = 700)
+```
+
+Merged the two datasets by Donor for 2023
+
+```{r}
+merged <- AC23_BV %>%
+  select(Donor, BV_W) %>%       # keep only relevant columns
+  inner_join(mean_piv_by_family %>% 
+               select(Donor, mean_PIv),
+             by = "Donor")
+```
+
+See if BV(W) and Plasticity are correlated in 2023
+
+```{r}
+cor_pearson <- cor(merged$BV_W, merged$mean_PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged$BV_W, merged$mean_PIv)
+
+# 	Pearson's product-moment correlation
+# 
+# data:  merged$BV_W and merged$mean_PIv
+# t = -1.6439, df = 38, p-value = 0.1085
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.52688526  0.05854156
+# sample estimates:
+#        cor 
+# -0.2576667
+```
+
+Make a scatterplot of Breeding value for Fitness and mean absolute plasticity in 2023
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+#Merge datasets by Donor
+merged <- AC23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    mean_piv_by_family %>% select(Donor, mean_PIv),
+    by = "Donor"
+  )
+
+# --- Scatterplot ---
+p <- ggplot(merged, aes(x = mean_PIv, y = BV_W)) +
+  geom_point(size = 3, alpha = 0.8) +
+  labs(
+    x = "Overall plasticity",
+    y = "AC BV(W) 2023"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.title = element_text(face = "bold")
+  )
+
+print(p)
+
+ggsave("Figures/AC_BV(W)2023_plasticity.jpeg", #save the plot
+       plot = p, width = 8, height = 6, dpi = 700)
+```
+
+#### Determine if breeding values are correlated with any specific traits:
+
+See if BV(W) in 2022 and Plasticity in corolla area are correlated
+
+```{r}
+piv_df_corolla <- piv_df %>%
+  filter(Trait == "mean_corolla_diam_mm_SEG")
+
+merged_corolla <- AC22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_corolla %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_corolla$BV_W, merged_corolla$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_corolla$BV_W, merged_corolla$PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_corolla$BV_W and merged_corolla$PIv
+# t = 0.41572, df = 38, p-value = 0.68
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2494516  0.3710190
+# sample estimates:
+#        cor 
+# 0.06728636
+```
+
+See if BV(W) and Plasticity in SLA are are correlated
+
+```{r}
+piv_df_SLA <- piv_df %>%
+  filter(Trait == "mean_SLA_SEG")
+
+merged_SLA <- AC22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_SLA %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_SLA$BV_W, merged_SLA$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_SLA$BV_W, merged_SLA$PIv)
+
+
+# 	Pearson's product-moment correlation
+# 
+# data:  merged_SLA$BV_W and merged_SLA$PIv
+# t = 0.61824, df = 38, p-value = 0.5401
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2185109  0.3989002
+# sample estimates:
+#        cor 
+# 0.09979103
+```
+
+See if BV(W) and Plasticity in SLA are are correlated
+
+```{r}
+piv_df_d13C <- piv_df %>%
+  filter(Trait == "mean_d13C_SEG")
+
+merged_d13C <- AC22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_d13C %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_d13C$BV_W, merged_d13C$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_d13C$BV_W, merged_d13C$PIv)
+
+
+# 	Pearson's product-moment correlation
+# 
+# data:  merged_d13C$BV_W and merged_d13C$PIv
+# t = -0.47999, df = 38, p-value = 0.634
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.3799502  0.2396763
+# sample estimates:
+#        cor 
+# -0.0776289 
+
+```
+
+See if BV(W) and Plasticity in SLA are are correlated
+
+```{r}
+piv_df_msm <- piv_df %>%
+  filter(Trait == "mean_msm_all")
+
+merged_msm <- AC22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_msm %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_msm$BV_W, merged_msm$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_msm$BV_W, merged_msm$PIv)
+
+
+# 	Pearson's product-moment correlation
+# 
+# data:  merged_msm$BV_W and merged_msm$PIv
+# t = -1.6989, df = 38, p-value = 0.0975
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.53308632  0.04994371
+# sample estimates:
+#        cor 
+# -0.2656994
+```
+
+Determine if breeding values are correlated with any specific traits: See if BV(W) in 2023 and Plasticity in corolla diameter are correlated
+
+```{r}
+piv_df_corolla <- piv_df %>%
+  filter(Trait == "mean_corolla_diam_mm_SEG")
+
+merged_corolla <- AC23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_corolla %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_corolla$BV_W, merged_corolla$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_corolla$BV_W, merged_corolla$PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_corolla$BV_W and merged_corolla$PIv
+# t = -0.49489, df = 38, p-value = 0.6235
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.3820105  0.2374034
+# sample estimates:
+#       cor 
+# -0.080024
+```
+
+See if BV(W) and Plasticity in SLA are correlated
+
+```{r}
+piv_df_SLA <- piv_df %>%
+  filter(Trait == "mean_SLA_SEG")
+
+merged_SLA <- AC23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_SLA %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_SLA$BV_W, merged_SLA$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_SLA$BV_W, merged_SLA$PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_SLA$BV_W and merged_SLA$PIv
+# t = 0.49014, df = 38, p-value = 0.6269
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2381278  0.3813546
+# sample estimates:
+#        cor 
+# 0.07926108 
+```
+
+See if BV(W) and Plasticity in d13C are correlated
+
+```{r}
+piv_df_d13C <- piv_df %>%
+  filter(Trait == "mean_d13C_SEG")
+
+merged_d13C <- AC23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_d13C %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_d13C$BV_W, merged_d13C$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_d13C$BV_W, merged_d13C$PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_d13C$BV_W and merged_d13C$PIv
+# t = -0.9775, df = 38, p-value = 0.3345
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.4463482  0.1628389
+# sample estimates:
+#        cor 
+# -0.1566149 
+```
+
+See if BV(W) and Plasticity in msm are correlated
+
+```{r}
+piv_df_msm <- piv_df %>%
+  filter(Trait == "mean_msm_all")
+
+merged_msm <- AC23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_msm %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_msm$BV_W, merged_msm$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_msm$BV_W, merged_msm$PIv)
+
+
+# 	Pearson's product-moment correlation
+# 
+# data:  merged_msm$BV_W and merged_msm$PIv
+# t = -1.9321, df = 38, p-value = 0.06082
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.55855720  0.01369765
+# sample estimates:
+#        cor 
+# -0.2990879
+```
+
+Linear Regression to determine if a correlation exists:
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and absolute plasticity are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ mean_PIv, data = merged)
+model_quad    <- lm(BV_W ~ mean_PIv + I(mean_PIv^2), data = merged)
+
+anova(model_linear, model_quad)
+
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ mean_PIv
+# Model 2: BV_W ~ mean_PIv + I(mean_PIv^2)
+#   Res.Df    RSS Df Sum of Sq      F Pr(>F)
+# 1     38 13.077                           
+# 2     37 12.718  1   0.35936 1.0455 0.3132
+
+##the linear model is better than the quadratic
+
+summary(model_linear)
+#Call:
+# lm(formula = BV_W ~ mean_PIv, data = merged)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -1.22727 -0.39430 -0.06287  0.25538  1.57531 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)   6.2505     0.2475  25.255   <2e-16 ***
+# mean_PIv     -4.2213     2.5679  -1.644    0.108    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.5866 on 38 degrees of freedom
+# Multiple R-squared:  0.06639,	Adjusted R-squared:  0.04182 
+# F-statistic: 2.702 on 1 and 38 DF,  p-value: 0.1085
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear...
+
+shapiro.test(residuals(model_linear))
+shapiro.test(residuals(model_quad))
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in corolla diameter are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_corolla)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_corolla)
+
+anova(model_linear, model_quad)
+# Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df    RSS Df Sum of Sq      F Pr(>F)
+# 1     38 13.918                           
+# 2     37 13.816  1   0.10162 0.2721  0.605
+
+summary(model_linear)
+
+#Call:
+# lm(formula = BV_W ~ PIv, data = merged_corolla)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -0.93325 -0.48914 -0.01214  0.31044  1.68933 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)   5.9383     0.1624  36.556   <2e-16 ***
+# PIv          -0.7713     1.5585  -0.495    0.624    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.6052 on 38 degrees of freedom
+# Multiple R-squared:  0.006404,	Adjusted R-squared:  -0.01974 
+# F-statistic: 0.2449 on 1 and 38 DF,  p-value: 0.6235
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear..
+
+shapiro.test(residuals(model_linear))
+shapiro.test(residuals(model_quad))
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in d13C are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_d13C)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_d13C)
+
+anova(model_linear, model_quad)
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df    RSS Df Sum of Sq      F Pr(>F)
+# 1     38 13.664                           
+# 2     37 13.122  1   0.54194 1.5281 0.2242
+
+summary(model_linear)
+
+#Call:
+# lm(formula = BV_W ~ PIv, data = merged_d13C)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -0.88707 -0.46341 -0.02474  0.32059  1.63525 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)   5.7678     0.1436  40.160   <2e-16 ***
+# PIv          -6.9587     7.1188  -0.978    0.335    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.5996 on 38 degrees of freedom
+# Multiple R-squared:  0.02453,	Adjusted R-squared:  -0.001142 
+# F-statistic: 0.9555 on 1 and 38 DF,  p-value: 0.3345
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear
+
+shapiro.test(residuals(model_linear))
+shapiro.test(residuals(model_quad))
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in msm are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_msm)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_msm)
+
+anova(model_linear, model_quad)
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df    RSS Df Sum of Sq      F Pr(>F)
+# 1     38 18.379                           
+# 2     37 17.976  1   0.40332 0.8302 0.3681
+
+summary(model_linear)
+
+#Call:
+# lm(formula = BV_W ~ PIv, data = merged_msm)
+# 
+# Residuals:
+#     Min      1Q  Median      3Q     Max 
+# -1.0401 -0.4851 -0.1099  0.3792  2.4943 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)  15.1371     0.1782  84.927   <2e-16 ***
+# PIv          -1.4900     0.8770  -1.699   0.0975 .  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.6955 on 38 degrees of freedom
+# Multiple R-squared:  0.0706,	Adjusted R-squared:  0.04614 
+# F-statistic: 2.886 on 1 and 38 DF,  p-value: 0.0975
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad)
+
+shapiro.test(residuals(model_linear)) #not normal
+shapiro.test(residuals(model_quad)) #not normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in SLA are correlated:
+
+```{r}
+library(car)
+library(lmtest)
+
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_SLA)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_SLA)
+
+anova(model_linear, model_quad)
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df    RSS Df Sum of Sq     F Pr(>F)
+# 1     38 13.919                          
+# 2     37 13.769  1   0.15034 0.404 0.5289
+
+summary(model_linear)
+
+#
+# Call:
+# lm(formula = BV_W ~ PIv, data = merged_SLA)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -0.86524 -0.48217 -0.02293  0.29135  1.70735 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)   5.8076     0.1646   35.28   <2e-16 ***
+# PIv           0.5113     1.0432    0.49    0.627    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.6052 on 38 degrees of freedom
+# Multiple R-squared:  0.006282,	Adjusted R-squared:  -0.01987 
+# F-statistic: 0.2402 on 1 and 38 DF,  p-value: 0.6269
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear
+
+shapiro.test(residuals(model_linear))
+shapiro.test(residuals(model_quad))
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+# BODEGA BAY
+
+Read in the data
+
+```{r}
+BB_22 <- read_csv(here::here("data_sheets/compiled_sheets/BB_compiledsheet_full_2022.csv"))
+BB_23 <- read_csv(here::here("data_sheets/compiled_sheets/BB_compiledsheet_full_2023.csv"))
+```
+
+Create a dataset
+
+```{r}
+BB22_trait <- BB_22 %>%
+  select(Donor, Recipient, F_plant, corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all) %>% #including maternal and paternal parents
+  mutate(Year = "2022") #adding year column
+
+BB23_trait <- BB_23 %>%
+  filter(Gen == "G1") %>%    # just include generation 1
+  select(Donor, Recipient, F_plant, corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all) %>% #including maternal and paternal parents
+  mutate(Year = "2023") #adding year column
+
+# combine years
+BB_traits <- bind_rows(BB22_trait, BB23_trait) %>%
+  filter(F_plant == "TRUE")
+```
+
+Get paternal family means
+
+```{r}
+fam_means <- BB_traits %>%
+  group_by(Donor, Year) %>% #all calculations done separately for each paternal family within each year
+  summarise(
+    across(
+      c(corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all),
+      ~ mean(.x, na.rm = TRUE), # get the family mean corolla diameter for each Donor × Year, remove NAs
+      .names = "mean_{.col}"
+    ),
+    .groups = "drop" #ungroups the results
+  )
+
+```
+
+Assign colors for Increasing and Decreasing
+
+```{r}
+dirs_wide <- fam_means %>%
+  pivot_wider(
+    names_from = Year,
+    values_from = starts_with("mean_"),
+    names_sep = "_"
+  ) %>%
+  mutate(
+    dir_corolla_diam_mm_SEG = if_else(mean_corolla_diam_mm_SEG_2023 >
+                                        mean_corolla_diam_mm_SEG_2022,
+                                      "increase", "decrease"),
+    dir_SLA_SEG  = if_else(mean_SLA_SEG_2023  > mean_SLA_SEG_2022,
+                           "increase", "decrease"),
+    dir_d13C_SEG = if_else(mean_d13C_SEG_2023 > mean_d13C_SEG_2022,
+                           "increase", "decrease"),
+    dir_msm_all  = if_else(mean_msm_all_2023  > mean_msm_all_2022,
+                           "increase", "decrease")
+  ) %>%
+  select(Donor, starts_with("dir_"))
+
+#Long format for plotting
+fam_long <- fam_means %>%
+  pivot_longer(
+    cols = starts_with("mean_"),
+    names_to  = "Trait",
+    values_to = "mean_value"
+  )
+
+dirs_long <- dirs_wide %>%
+  pivot_longer(
+    cols = starts_with("dir_"),
+    names_to  = "Trait",
+    values_to = "dir"
+  ) %>%
+  mutate(
+    Trait = case_when(
+      Trait == "dir_corolla_diam_mm_SEG" ~ "corolla diameter (mm)",
+      Trait == "dir_SLA_SEG"             ~ "specific leaf area (mm/mg)",
+      Trait == "dir_d13C_SEG"            ~ "δ13C (‰)",
+      Trait == "dir_msm_all"             ~ "seed mass (mg)",
+      TRUE ~ Trait
+    )
+  )
+```
+
+Plot the data
+
+```{r}
+plot_dat <- fam_long %>%
+  mutate(
+    Trait = case_when(
+      Trait == "mean_corolla_diam_mm_SEG" ~ "corolla diameter (mm)",
+      Trait == "mean_SLA_SEG"             ~ "specific leaf area (mm/mg)",
+      Trait == "mean_d13C_SEG"            ~ "δ13C (‰)",
+      Trait == "mean_msm_all"             ~ "seed mass (mg)",
+      TRUE ~ Trait
+    )
+  ) %>%
+  left_join(dirs_long, by = c("Donor", "Trait"))
+
+#One plot, all traits, blue = increase, red = decrease
+p <- ggplot(plot_dat,
+            aes(x = Year, y = mean_value,
+                group = Donor, color = dir)) +
+  geom_line(alpha = 0.9) +
+  geom_point(size = 2.5) +
+  scale_x_discrete(expand = c(0.05, 0)) +
+  scale_color_manual(
+    values = c(increase = "#2c7fb8", decrease = "#d95f0e"),
+    name   = "Change 2022 → 2023"
+  ) +
+  facet_wrap(~ Trait, scales = "free_y") +
+  labs(x = "Year", y = "BB paternal family mean") +
+  theme_bw(base_size = 18) +
+  theme(
+    legend.position = "bottom",
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 18),
+    axis.text.x  = element_text(size = 16),
+    axis.text.y  = element_text(size = 16)
+  )
+
+p
+
+ggsave("Figures/BB_reaction_norms_traits.jpeg", #save the plot
+       plot = p, width = 8, height = 6, dpi = 700)
+```
+
+Pivot the dataframe so each family shows trait means
+```{r}
+fam_wide <- fam_means %>%
+  tidyr::pivot_wider(
+    id_cols = Donor,
+    names_from = Year,
+    values_from = c(mean_corolla_diam_mm_SEG, mean_SLA_SEG, mean_d13C_SEG, mean_msm_all)
+  )
+```
+
+## **1. Is there plasticity in the traits of interest (corolla diameter, SLA, d13C, msm)?**
+
+YES. Spearman's Rank Correlations. We will also observe plasticity using the plasticity index as well.
+
+```{r}
+# Spearman correlation for corolla area
+cor.test(fam_wide$mean_corolla_diam_mm_SEG_2022, fam_wide$mean_corolla_diam_mm_SEG_2023, method = "spearman")
+# 	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_corolla_diam_mm_SEG_2022 and fam_wide$mean_corolla_diam_mm_SEG_2023
+# S = 11644, p-value = 0.004065
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#       rho 
+# 0.4059184
+
+
+# Spearman correlation for SLA **SIGNIFICANT CORRELATION**
+cor.test(fam_wide$mean_SLA_SEG_2022, fam_wide$mean_SLA_SEG_2023, method = "spearman")
+#	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_SLA_SEG_2022 and fam_wide$mean_SLA_SEG_2023
+# S = 22138, p-value = 0.169
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#        rho 
+# -0.2015849
+
+# Spearman correlation for d13C
+cor.test(fam_wide$mean_d13C_SEG_2022, fam_wide$mean_d13C_SEG_2023, method = "spearman")
+#	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_d13C_SEG_2022 and fam_wide$mean_d13C_SEG_2023
+# S = 12931, p-value = 0.01675
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#       rho 
+# 0.3402638 
+
+# Spearman correlation for msm
+cor.test(fam_wide$mean_msm_all_2022, fam_wide$mean_msm_all_2023, method = "spearman")
+#	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_msm_all_2022 and fam_wide$mean_msm_all_2023
+# S = 16228, p-value = 0.6792
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#        rho 
+# 0.06174838 
+```
+
+## **2. Do traits differ in how plastic they are, on average, across genotypes?**
+
+Calculate how much two traits differ from one another using PIv (Valladares et al., 2006):
+
+```{r}
+piv_df <- fam_long %>%
+  group_by(Donor, Trait) %>%
+  summarise(
+    max_mean = max(mean_value, na.rm = TRUE), #determine the maximum donor mean
+    min_mean = min(mean_value, na.rm = TRUE), #determine the minimum donor mean
+    PIv = (max_mean - min_mean) / max_mean, #calculate the PIv to determine how much traits differ from eachother
+    .groups = "drop"
+  )
+```
+
+Calculate plasticity by trait using PIv:
+
+```{r}
+mean_piv_by_trait <- piv_df %>%
+  group_by(Trait) %>%
+  summarise(mean_PIv = mean(PIv, na.rm = TRUE))
+
+# mean_SLA_SEG
+# 0.19641035
+# 2
+# mean_corolla_diam_mm_SEG
+# 0.10031997
+# 3
+# mean_d13C_SEG
+# -0.02074321
+# 4
+# mean_msm_all
+# 0.26916701
+
+
+#Mean seed mass is most plastic
+```
+
+Calculate how much traits differ from one another using Plmd (used for non-normal distributions):
+
+SLA and msm were slightly non-normal based on histograms earlier.
+
+```{r}
+
+BB_traits_long <- BB_traits %>%
+  pivot_longer(
+    cols = c(corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all),
+    names_to = "Trait",
+    values_to = "value"
+  )
+
+PImd_df <- BB_traits_long %>%
+  group_by(Donor, Trait, Year) %>%
+  summarise(
+    median_value = median(value, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+PImd_df <- PImd_df %>%
+  group_by(Donor, Trait) %>%
+  summarise(
+    max_median = max(median_value, na.rm = TRUE),
+    min_median = min(median_value, na.rm = TRUE),
+    PImd = (max_median - min_median) / max_median,
+    .groups = "drop"
+  )
+```
+
+Do traits differ in how plastic they are, on average, across genotypes? Calculate plasticity by trait:
+
+```{r}
+mean_PImd_by_trait <- PImd_df %>%
+  group_by(Trait) %>%
+  summarise(mean_PImd = mean(PImd, na.rm = TRUE))
+
+
+#SLA_SEG
+# 0.18273880
+# 
+# corolla_diam_mm_SEG
+# 0.11388103
+# 
+# d13C_SEG
+# -0.02491601
+# 
+# msm_all
+# 0.27613576
+```
+
+Comparing PIv and PImd:
+```{r}
+cor.test(mean_PImd_by_trait$mean_PImd, mean_piv_by_trait$mean_PIv)
+#Families ranked as highly plastic using PIv are also ranked as highly plastic using PImd
+
+#Pearson's product-moment correlation
+# 
+# data:  mean_PImd_by_trait$mean_PImd and mean_piv_by_trait$mean_PIv
+# t = 14.847, df = 2, p-value = 0.004506
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  0.7956510 0.9999104
+# sample estimates:
+#       cor 
+# 0.9954939
+
+#Traits ranked as highly plastic using PIv are also ranked as highly plastic using PImd
+
+#PIv and PImd are esentially the same
+```
+
+## **3. Within each trait, do paternal families differ in their plastic responses (i.e., is there genetic variation for plasticity)?**
+
+Do paternal families differ in their plastic responses to corolla area?
+
+```{r}
+library(lme4)
+library(lmerTest)
+
+model <- lmer(corolla_diam_mm_SEG ~ Year * Donor + (1|Recipient), data = BB_traits)
+anova(model) #Singular
+
+
+#Type III Analysis of Variance Table with Satterthwaite's method
+#             Sum Sq Mean Sq NumDF DenDF F value    Pr(>F)    
+# Year        673.46  673.46     1   505 33.0771 1.536e-08 ***
+# Donor      1251.45   26.07    48   505  1.2805    0.1048    
+# Year:Donor  608.97   12.69    48   505  0.6231    0.9780    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+shapiro.test(residuals(model))
+#Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.99463, p-value = 0.03256 #not good
+plot(model)
+hist(BB_traits$corolla_diam_mm_SEG) #normal
+```
+
+Do paternal families differ in their plastic responses to SLA?
+
+```{r}
+
+model <- lmer(SLA_SEG ~ Year * Donor + (1|Recipient), data = BB_traits)
+anova(model)
+#Type III Analysis of Variance Table with Satterthwaite's method
+#             Sum Sq Mean Sq NumDF   DenDF F value  Pr(>F)  
+# Year         15.63  15.632     1 215.978  0.4574 0.49956  
+# Donor      1649.24  34.359    48  75.521  1.0053 0.48414  
+# Year:Donor 2180.03  46.384    47 200.923  1.3572 0.07803 .
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+shapiro.test(residuals(model)) #not normal
+#
+# 	Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.95724, p-value = 2.596e-08
+plot(model)
+hist(BB_traits$SLA_SEG) #normal-ish
+```
+
+Do paternal families differ in their plastic responses to d13C?
+
+```{r}
+
+model <- lmer(d13C_SEG ~ Year * Donor + (1|Recipient), data = BB_traits)
+anova(model)
+
+# Type III Analysis of Variance Table with Satterthwaite's method
+#            Sum Sq Mean Sq NumDF  DenDF F value    Pr(>F)    
+# Year       12.869 12.8689     1 366.82 11.6504 0.0007135 ***
+# Donor      69.344  1.4447    48  81.03  1.3079 0.1422165    
+# Year:Donor 47.880  0.9975    48 348.31  0.9031 0.6577596    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+shapiro.test(residuals(model))
+#Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.99519, p-value = 0.132
+#normal
+plot(model)
+hist(BB_traits$d13C_SEG) #normal
+```
+
+Do paternal families differ in their plastic responses to msm?
+
+```{r}
+
+model <- lmer(msm_all ~ Year * Donor + (1|Recipient), data = BB_traits) #warning because there are a few missing datapoints, but its ok
+anova(model)
+
+#Type III Analysis of Variance Table with Satterthwaite's method
+#             Sum Sq Mean Sq NumDF   DenDF F value    Pr(>F)    
+# Year        16.316 16.3162     1 220.758  6.8521 0.0094661 ** 
+# Donor      226.207  4.7126    48  84.712  1.9791 0.0030229 ** 
+# Year:Donor 214.904  4.6718    46 210.842  1.9620 0.0007473 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+shapiro.test(residuals(model))
+#	Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.95733, p-value = 1.602e-08
+#not normal
+plot(model)
+hist(BB_traits$msm_all) #normal-ish?
+```
+
+## **4. Across traits, are some paternal families consistently more plastic than others?**
+
+Calculate the overall multivariate plasticity using PIv:
+
+```{r}
+mean_piv_by_family <- piv_df %>%
+  group_by(Donor) %>%
+  summarise(mean_PIv = mean(PIv, na.rm = TRUE))
+```
+
+Calculate the overall multivariate plasticity using PImd:
+
+```{r}
+mean_PImd_by_family <- PImd_df %>%
+  group_by(Donor) %>%
+  summarise(mean_PImd = mean(PImd, na.rm = TRUE))
+```
+
+```{r}
+cor.test(mean_PImd_by_family$mean_PImd, mean_piv_by_family$mean_PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  mean_PImd_by_family$mean_PImd and mean_piv_by_family$mean_PIv
+# t = 8.0419, df = 47, p-value = 2.205e-10
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  0.6104362 0.8584909
+# sample estimates:
+#       cor 
+# 0.7610044 
+
+```
+
+## **5. How is a paternal family's trait-specific plasticity as well as it's cross-trait (average) plasticity associated with breeding values for fitness?**
+
+```{r}
+
+BB22_BV<-read.csv("/Users/Helen/Desktop/nemo_field/aster/processed_data/BB22_bhat.Donor.mu.csv")
+BB22_BV <- BB22_BV %>%
+  rename(Donor = X) %>% 
+  rename(BV_W = bhat.Donor.mu) %>% 
+  mutate(Donor = sub(".*Donor", "", Donor))
+
+
+BB23_BV<-read.csv("/Users/Helen/Desktop/nemo_field/aster/processed_data/BB23_bhat.Donor.mu.csv")
+BB23_BV <- BB23_BV %>%
+  rename(Donor = X) %>%   
+  rename(BV_W = bhat.donor.mu) %>% 
+  mutate(Donor = sub(".*Donor", "", Donor))
+
+```
+
+Merged the two datasets by Donor for 2022
+
+```{r}
+merged <- BB22_BV %>%
+  select(Donor, BV_W) %>%       # keep only relevant columns
+  inner_join(mean_piv_by_family %>% 
+               select(Donor, mean_PIv),
+             by = "Donor")
+```
+
+See if BV(W) and Plasticity are correlated for 2022
+
+```{r}
+cor_pearson <- cor(merged$BV_W, merged$mean_PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged$BV_W, merged$mean_PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged$BV_W and merged$mean_PIv
+# t = -0.9125, df = 47, p-value = 0.3662
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.3983559  0.1550090
+# sample estimates:
+#        cor 
+# -0.1319386
+```
+
+Make a scatterplot of Breeding value for Fitness and mean absolute plasticity for 2022
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+#Merge datasets by Donor
+merged <- BB22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+   mean_piv_by_family %>% select(Donor, mean_PIv),
+    by = "Donor"
+  )
+
+#plot
+p <- ggplot(merged, aes(x = mean_PIv, y = BV_W)) +
+  geom_point(size = 3, alpha = 0.8) +
+  labs(
+    x = "Overall Plasticity",
+    y = "BB BV(W) 2022"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.title = element_text(face = "bold")
+  )
+
+print(p)
+
+ggsave("Figures/BB_BV(W)2022_plasticity.jpeg", #save the plot
+       plot = p, width = 8, height = 6, dpi = 700)
+```
+
+Merged the two datasets by Donor for 2023
+
+```{r}
+merged <- BB23_BV %>%
+  select(Donor, BV_W) %>%       # keep only relevant columns
+  inner_join(mean_piv_by_family %>% 
+               select(Donor, mean_PIv),
+             by = "Donor")
+```
+
+See if BV(W) and Plasticity are correlated in 2023
+
+```{r}
+cor_pearson <- cor(merged$BV_W, merged$mean_PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged$BV_W, merged$mean_PIv)
+
+# 	Pearson's product-moment correlation
+# 
+# data:  merged$BV_W and merged$mean_PIv
+# t = -0.41562, df = 47, p-value = 0.6796
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.3359920  0.2245041
+# sample estimates:
+#         cor 
+# -0.06051267 
+```
+
+Make a scatterplot of Breeding value for Fitness and mean absolute plasticity in 2023
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+#Merge datasets by Donor
+merged <- BB23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    mean_piv_by_family %>% select(Donor, mean_PIv),
+    by = "Donor"
+  )
+
+# --- Scatterplot ---
+p <- ggplot(merged, aes(x = mean_PIv, y = BV_W)) +
+  geom_point(size = 3, alpha = 0.8) +
+  labs(
+    x = "Overall plasticity",
+    y = "BB BV(W) 2023"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.title = element_text(face = "bold")
+  )
+
+print(p)
+
+ggsave("Figures/BB_BV(W)2023_plasticity.jpeg", #save the plot
+       plot = p, width = 8, height = 6, dpi = 700)
+```
+
+#### Determine if breeding values are correlated with any specific traits:
+
+See if BV(W) in 2022 and Plasticity in corolla diameter are correlated
+
+```{r}
+piv_df_corolla <- piv_df %>%
+  filter(Trait == "mean_corolla_diam_mm_SEG")
+
+merged_corolla <- BB22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_corolla %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_corolla$BV_W, merged_corolla$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_corolla$BV_W, merged_corolla$PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_corolla$BV_W and merged_corolla$PIv
+# t = 0.85579, df = 47, p-value = 0.3965
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.1630055  0.3914313
+# sample estimates:
+#       cor 
+# 0.1238688
+```
+
+See if BV(W) and Plasticity in SLA are correlated
+
+```{r}
+piv_df_SLA <- piv_df %>%
+  filter(Trait == "mean_SLA_SEG")
+
+merged_SLA <- BB22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_SLA %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_SLA$BV_W, merged_SLA$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_SLA$BV_W, merged_SLA$PIv)
+
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_SLA$BV_W and merged_SLA$PIv
+# t = 0.015751, df = 47, p-value = 0.9875
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2790794  0.2833110
+# sample estimates:
+#         cor 
+# 0.002297453
+```
+
+See if BV(W) and Plasticity in d13C are correlated
+
+```{r}
+piv_df_d13C <- piv_df %>%
+  filter(Trait == "mean_d13C_SEG")
+
+merged_d13C <- BB22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_d13C %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_d13C$BV_W, merged_d13C$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_d13C$BV_W, merged_d13C$PIv)
+
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_d13C$BV_W and merged_d13C$PIv
+# t = 0.77348, df = 47, p-value = 0.4431
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.1745888  0.3812881
+# sample estimates:
+#       cor 
+# 0.1121118 
+
+```
+
+See if BV(W) and Plasticity in msm are correlated
+
+```{r}
+piv_df_msm <- piv_df %>%
+  filter(Trait == "mean_msm_all")
+
+merged_msm <- BB22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_msm %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_msm$BV_W, merged_msm$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_msm$BV_W, merged_msm$PIv)
+
+
+#Pearson's product-moment correlation
+# 
+# data:  merged_msm$BV_W and merged_msm$PIv
+# t = -1.4127, df = 47, p-value = 0.1643
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.45708126  0.08414693
+# sample estimates:
+#        cor 
+# -0.2018252
+```
+
+Determine if breeding values are correlated with any specific traits: See if BV(W) in 2023 and Plasticity in corolla diameter are correlated
+
+```{r}
+piv_df_corolla <- piv_df %>%
+  filter(Trait == "mean_corolla_diam_mm_SEG")
+
+merged_corolla <- BB23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_corolla %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_corolla$BV_W, merged_corolla$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_corolla$BV_W, merged_corolla$PIv)
+
+#	Pearson's product-moment correlation
+
+# data:  merged_corolla$BV_W and merged_corolla$PIv
+# t = 0.6797, df = 47, p-value = 0.5
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.1877447  0.3696032
+# sample estimates:
+#        cor 
+# 0.09866051
+```
+
+See if BV(W) and Plasticity in SLA are correlated
+
+```{r}
+piv_df_SLA <- piv_df %>%
+  filter(Trait == "mean_SLA_SEG")
+
+merged_SLA <- BB23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_SLA %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_SLA$BV_W, merged_SLA$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_SLA$BV_W, merged_SLA$PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_SLA$BV_W and merged_SLA$PIv
+# t = -0.69204, df = 47, p-value = 0.4923
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.3711482  0.1860166
+# sample estimates:
+#        cor 
+# -0.1004334 
+```
+
+See if BV(W) and Plasticity in d13C are correlated
+
+```{r}
+piv_df_d13C <- piv_df %>%
+  filter(Trait == "mean_d13C_SEG")
+
+merged_d13C <- BB23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_d13C %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_d13C$BV_W, merged_d13C$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_d13C$BV_W, merged_d13C$PIv)
+
+# 	Pearson's product-moment correlation
+# 
+# data:  merged_d13C$BV_W and merged_d13C$PIv
+# t = -0.98754, df = 47, p-value = 0.3284
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.4074373  0.1444107
+# sample estimates:
+#        cor 
+# -0.1425756
+```
+
+See if BV(W) and Plasticity in msm are correlated
+
+```{r}
+piv_df_msm <- piv_df %>%
+  filter(Trait == "mean_msm_all")
+
+merged_msm <- BB23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_msm %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_msm$BV_W, merged_msm$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_msm$BV_W, merged_msm$PIv)
+
+# 	Pearson's product-moment correlation
+# 
+# data:  merged_msm$BV_W and merged_msm$PIv
+# t = -0.13999, df = 47, p-value = 0.8893
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2998908  0.2622865
+# sample estimates:
+#         cor 
+# -0.02041582 
+```
+
+Linear Regression to determine if a correlation exists: \####################################################### Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and absolute plasticity are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ mean_PIv, data = merged)
+model_quad    <- lm(BV_W ~ mean_PIv + I(mean_PIv^2), data = merged)
+
+anova(model_linear, model_quad)
+
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ mean_PIv
+# Model 2: BV_W ~ mean_PIv + I(mean_PIv^2)
+#   Res.Df    RSS Df Sum of Sq      F Pr(>F)
+# 1     47 564.34                           
+# 2     46 561.02  1    3.3269 0.2728  0.604
+
+summary(model_linear)
+#Call:
+# lm(formula = BV_W ~ mean_PIv, data = merged)
+# 
+# Residuals:
+#     Min      1Q  Median      3Q     Max 
+# -4.5257 -2.5273 -0.6813  1.9686 11.4419 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)   15.902      1.324  12.013 6.23e-16 ***
+# mean_PIv      -3.744      9.008  -0.416     0.68    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 3.465 on 47 degrees of freedom
+# Multiple R-squared:  0.003662,	Adjusted R-squared:  -0.01754 
+# F-statistic: 0.1727 on 1 and 47 DF,  p-value: 0.6796
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear...
+
+shapiro.test(residuals(model_linear)) #not normal
+shapiro.test(residuals(model_quad)) #not normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in corolla diameter are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_corolla)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_corolla)
+
+anova(model_linear, model_quad)
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df   RSS Df  Sum of Sq  F Pr(>F)
+# 1     47 560.9                        
+# 2     46 560.9  1 0.00028351  0 0.9962
+
+summary(model_linear)
+
+# Call:
+# lm(formula = BV_W ~ PIv, data = merged_corolla)
+# 
+# Residuals:
+#     Min      1Q  Median      3Q     Max 
+# -4.6103 -2.7410 -0.5098  2.4246 11.0299 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)  14.8606     0.9247   16.07   <2e-16 ***
+# PIv           5.2986     7.7954    0.68      0.5    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 3.455 on 47 degrees of freedom
+# Multiple R-squared:  0.009734,	Adjusted R-squared:  -0.01134 
+# F-statistic: 0.462 on 1 and 47 DF,  p-value: 0.5
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear..
+
+shapiro.test(residuals(model_linear)) #non-normal
+shapiro.test(residuals(model_quad)) #non-normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in d13C are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_d13C)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_d13C)
+
+anova(model_linear, model_quad)
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df    RSS Df Sum of Sq      F  Pr(>F)  
+# 1     47 554.90                              
+# 2     46 493.38  1    61.526 5.7364 0.02075 *
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+summary(model_linear)
+#Call:
+# lm(formula = BV_W ~ PIv, data = merged_d13C)
+# 
+# Residuals:
+#     Min      1Q  Median      3Q     Max 
+# -5.0145 -2.2300 -0.7544  2.6733  9.9128 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)  14.6849     0.8683  16.913   <2e-16 ***
+# PIv         -34.0959    34.5262  -0.988    0.328    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 3.436 on 47 degrees of freedom
+# Multiple R-squared:  0.02033,	Adjusted R-squared:  -0.0005163 
+# F-statistic: 0.9752 on 1 and 47 DF,  p-value: 0.3284
+
+summary(model_quad)
+
+# Call:
+# lm(formula = BV_W ~ PIv + I(PIv^2), data = merged_d13C)
+# 
+# Residuals:
+#     Min      1Q  Median      3Q     Max 
+# -6.5289 -2.3982 -0.1377  2.0149  8.2976 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)   16.249      1.054  15.413   <2e-16 ***
+# PIv          160.436     87.635   1.831   0.0736 .  
+# I(PIv^2)    3907.155   1631.324   2.395   0.0207 *  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 3.275 on 46 degrees of freedom
+# Multiple R-squared:  0.129,	Adjusted R-squared:  0.09108 
+# F-statistic: 3.405 on 2 and 46 DF,  p-value: 0.04178
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear
+
+shapiro.test(residuals(model_linear)) #not normal
+shapiro.test(residuals(model_quad)) #not normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+
+
+#THE QUADRATIC MODEL DETECTS OPPTOMISING SELECTION FOR d13C
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in msm are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_msm)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_msm)
+
+anova(model_linear, model_quad)
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df    RSS Df Sum of Sq      F  Pr(>F)  
+# 1     47 566.18                              
+# 2     46 519.09  1    47.091 4.1731 0.04683 *
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+summary(model_linear)
+
+#
+# Call:
+# lm(formula = BV_W ~ PIv, data = merged_msm)
+# 
+# Residuals:
+#     Min      1Q  Median      3Q     Max 
+# -4.6059 -2.7105 -0.7424  2.0012 11.3889 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)  15.4894     0.8538   18.14   <2e-16 ***
+# PIv          -0.3615     2.5825   -0.14    0.889    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 3.471 on 47 degrees of freedom
+# Multiple R-squared:  0.0004168,	Adjusted R-squared:  -0.02085 
+# F-statistic: 0.0196 on 1 and 47 DF,  p-value: 0.8893
+
+
+summary(model_quad)
+
+#Call:
+# lm(formula = BV_W ~ PIv + I(PIv^2), data = merged_msm)
+# 
+# Residuals:
+#     Min      1Q  Median      3Q     Max 
+# -5.2188 -1.9986 -0.7142  1.9959 10.5248 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)   14.067      1.081  13.017   <2e-16 ***
+# PIv           13.959      7.443   1.876   0.0671 .  
+# I(PIv^2)     -22.250     10.892  -2.043   0.0468 *  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 3.359 on 46 degrees of freedom
+# Multiple R-squared:  0.08356,	Adjusted R-squared:  0.04371 
+# F-statistic: 2.097 on 2 and 46 DF,  p-value: 0.1344
+
+#THE QUADRATIC MODEL DETECTS OPPTOMISING SELECTION FOR msm
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear
+
+shapiro.test(residuals(model_linear)) #not normal
+shapiro.test(residuals(model_quad)) #not normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in SLA are correlated:
+
+```{r}
+library(car)
+library(lmtest)
+
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_SLA)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_SLA)
+
+anova(model_linear, model_quad)
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df    RSS Df Sum of Sq      F Pr(>F)
+# 1     47 560.70                           
+# 2     46 558.87  1    1.8357 0.1511 0.6993
+
+summary(model_linear)
+#Call:
+# lm(formula = BV_W ~ PIv, data = merged_SLA)
+# 
+# Residuals:
+#     Min      1Q  Median      3Q     Max 
+# -4.9663 -2.5562 -0.5188  2.2206 11.3274 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)  15.8874     0.8693  18.277   <2e-16 ***
+# PIv          -2.5215     3.6436  -0.692    0.492    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 3.454 on 47 degrees of freedom
+# Multiple R-squared:  0.01009,	Adjusted R-squared:  -0.01098 
+# F-statistic: 0.4789 on 1 and 47 DF,  p-value: 0.4923
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear
+
+shapiro.test(residuals(model_linear)) #not normal
+shapiro.test(residuals(model_quad)) #not normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+
+# BLUE OAK
+
+Read in the data
+
+```{r}
+BO_22 <- read_csv(here::here("data_sheets/compiled_sheets/BO_compiledsheet_full_2022.csv"))
+BO_23 <- read_csv(here::here("data_sheets/compiled_sheets/BO_compiledsheet_full_2023.csv"))
+```
+
+Create a dataset
+
+```{r}
+BO22_trait <- BO_22 %>%
+  select(Donor, Recipient, F_plant, corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all) %>% #including maternal and paternal parents
+  mutate(Year = "2022") #adding year column
+
+BO23_trait <- BO_23 %>%
+  filter(Gen == "G1") %>%    # just include generation 1
+  select(Donor, Recipient, F_plant, corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all) %>% #including maternal and paternal parents
+  mutate(Year = "2023") #adding year column
+
+#REMOVING THIS ONE ODD OUTLIER WHICH WAS LIKELY A MISTAKE
+BO23_trait <- BO23_trait %>%
+  mutate(SLA_SEG = ifelse(Donor == "BO_194" &
+                          Recipient == "BO_098",
+                          NA,
+                          SLA_SEG))
+
+# combine years
+BO_traits <- bind_rows(BO22_trait, BO23_trait) %>%
+  filter(F_plant == "TRUE")
+```
+
+Get paternal family means
+
+```{r}
+fam_means <- BO_traits %>%
+  group_by(Donor, Year) %>% #all calculations done separately for each paternal family within each year
+  summarise(
+    across(
+      c(corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all),
+      ~ mean(.x, na.rm = TRUE), # get the family mean corolla diameter for each Donor × Year, remove NAs
+      .names = "mean_{.col}"
+    ),
+    .groups = "drop" #ungroups the results
+  )
+
+```
+
+Assign colors for Increasing and Decreasing
+
+```{r}
+dirs_wide <- fam_means %>%
+  pivot_wider(
+    names_from = Year,
+    values_from = starts_with("mean_"),
+    names_sep = "_"
+  ) %>%
+  mutate(
+    dir_corolla_diam_mm_SEG = if_else(mean_corolla_diam_mm_SEG_2023 >
+                                        mean_corolla_diam_mm_SEG_2022,
+                                      "increase", "decrease"),
+    dir_SLA_SEG  = if_else(mean_SLA_SEG_2023  > mean_SLA_SEG_2022,
+                           "increase", "decrease"),
+    dir_d13C_SEG = if_else(mean_d13C_SEG_2023 > mean_d13C_SEG_2022,
+                           "increase", "decrease"),
+    dir_msm_all  = if_else(mean_msm_all_2023  > mean_msm_all_2022,
+                           "increase", "decrease")
+  ) %>%
+  select(Donor, starts_with("dir_"))
+
+#Long format for plotting
+fam_long <- fam_means %>%
+  pivot_longer(
+    cols = starts_with("mean_"),
+    names_to  = "Trait",
+    values_to = "mean_value"
+  )
+
+dirs_long <- dirs_wide %>%
+  pivot_longer(
+    cols = starts_with("dir_"),
+    names_to  = "Trait",
+    values_to = "dir"
+  ) %>%
+  mutate(
+    Trait = case_when(
+      Trait == "dir_corolla_diam_mm_SEG" ~ "corolla diameter (mm)",
+      Trait == "dir_SLA_SEG"             ~ "specific leaf area (mm/mg)",
+      Trait == "dir_d13C_SEG"            ~ "δ13C (‰)",
+      Trait == "dir_msm_all"             ~ "seed mass (mg)",
+      TRUE ~ Trait
+    )
+  )
+```
+
+Plot the data
+
+```{r}
+plot_dat <- fam_long %>%
+  mutate(
+    Trait = case_when(
+      Trait == "mean_corolla_diam_mm_SEG" ~ "corolla diameter (mm)",
+      Trait == "mean_SLA_SEG"             ~ "specific leaf area (mm/mg)",
+      Trait == "mean_d13C_SEG"            ~ "δ13C (‰)",
+      Trait == "mean_msm_all"             ~ "seed mass (mg)",
+      TRUE ~ Trait
+    )
+  ) %>%
+  left_join(dirs_long, by = c("Donor", "Trait"))
+
+#One plot, all traits, blue = increase, red = decrease
+p <- ggplot(plot_dat,
+            aes(x = Year, y = mean_value,
+                group = Donor, color = dir)) +
+  geom_line(alpha = 0.9) +
+  geom_point(size = 2.5) +
+  scale_x_discrete(expand = c(0.05, 0)) +
+  scale_color_manual(
+    values = c(increase = "#2c7fb8", decrease = "#d95f0e"),
+    name   = "Change 2022 → 2023"
+  ) +
+  facet_wrap(~ Trait, scales = "free_y") +
+  labs(x = "Year", y = "BO paternal family mean") +
+  theme_bw(base_size = 18) +
+  theme(
+    legend.position = "bottom",
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 18),
+    axis.text.x  = element_text(size = 16),
+    axis.text.y  = element_text(size = 16)
+  )
+
+p
+
+ggsave("Figures/BO_reaction_norms_traits.jpeg", #save the plot
+       plot = p, width = 8, height = 6, dpi = 700)
+```
+
+Pivot the dataframe so each family shows trait means
+
+```{r}
+fam_wide <- fam_means %>%
+  tidyr::pivot_wider(
+    id_cols = Donor,
+    names_from = Year,
+    values_from = c(mean_corolla_diam_mm_SEG, mean_SLA_SEG, mean_d13C_SEG, mean_msm_all)
+  )
+```
+
+## **1. Is there plasticity in the traits of interest (corolla diameter, SLA, d13C, msm)?**
+
+YES. Spearman's Rank Correlations. We will also observe plasticity using the plasticity index as well.
+
+```{r}
+# Spearman correlation for corolla area
+cor.test(fam_wide$mean_corolla_diam_mm_SEG_2022, fam_wide$mean_corolla_diam_mm_SEG_2023, method = "spearman")
+#	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_corolla_diam_mm_SEG_2022 and fam_wide$mean_corolla_diam_mm_SEG_2023
+# S = 10578, p-value = 0.3655
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#       rho 
+# 0.1428571 
+
+
+# Spearman correlation for SLA **SIGNIFICANT CORRELATION**
+cor.test(fam_wide$mean_SLA_SEG_2022, fam_wide$mean_SLA_SEG_2023, method = "spearman")
+#	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_SLA_SEG_2022 and fam_wide$mean_SLA_SEG_2023
+# S = 8736, p-value = 0.02604
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#       rho 
+# 0.3403805
+
+# Spearman correlation for d13C
+cor.test(fam_wide$mean_d13C_SEG_2022, fam_wide$mean_d13C_SEG_2023, method = "spearman")
+#	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_d13C_SEG_2022 and fam_wide$mean_d13C_SEG_2023
+# S = 12052, p-value = 0.3289
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#       rho 
+# 0.1506854
+
+# Spearman correlation for msm
+cor.test(fam_wide$mean_msm_all_2022, fam_wide$mean_msm_all_2023, method = "spearman")
+#	Spearman's rank correlation rho
+
+# data:  fam_wide$mean_msm_all_2022 and fam_wide$mean_msm_all_2023
+# S = 10372, p-value = 0.547
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#        rho 
+# 0.09651568 
+```
+
+## **2. Do traits differ in how plastic they are, on average, across genotypes?**
+
+Calculate how much two traits differ from one another using PIv (Valladares et al., 2006):
+
+```{r}
+piv_df <- fam_long %>%
+  group_by(Donor, Trait) %>%
+  summarise(
+    max_mean = max(mean_value, na.rm = TRUE), #determine the maximum donor mean
+    min_mean = min(mean_value, na.rm = TRUE), #determine the minimum donor mean
+    PIv = (max_mean - min_mean) / max_mean, #calculate the PIv to determine how much traits differ from eachother
+    .groups = "drop"
+  )
+```
+
+Calculate plasticity by trait using PIv:
+
+```{r}
+mean_piv_by_trait <- piv_df %>%
+  group_by(Trait) %>%
+  summarise(mean_PIv = mean(PIv, na.rm = TRUE))
+
+# mean_SLA_SEG
+# 0.11008189
+# 
+# mean_corolla_diam_mm_SEG
+# 0.11343378
+# 
+# mean_d13C_SEG
+# -0.04560326
+# 
+# mean_msm_all
+# 0.28343208
+
+#Mean seed mass is most plastic
+```
+
+Calculate how much traits differ from one another using Plmd (used for non-normal distributions):
+
+SLA and msm were slightly non-normal based on histograms earlier.
+
+```{r}
+
+BO_traits_long <- BO_traits %>%
+  pivot_longer(
+    cols = c(corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all),
+    names_to = "Trait",
+    values_to = "value"
+  )
+
+PImd_df <- BO_traits_long %>%
+  group_by(Donor, Trait, Year) %>%
+  summarise(
+    median_value = median(value, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+PImd_df <- PImd_df %>%
+  group_by(Donor, Trait) %>%
+  summarise(
+    max_median = max(median_value, na.rm = TRUE),
+    min_median = min(median_value, na.rm = TRUE),
+    PImd = (max_median - min_median) / max_median,
+    .groups = "drop"
+  )
+```
+
+Do traits differ in how plastic they are, on average, across genotypes? Calculate plasticity by trait:
+
+```{r}
+mean_PImd_by_trait <- PImd_df %>%
+  group_by(Trait) %>%
+  summarise(mean_PImd = mean(PImd, na.rm = TRUE))
+
+# 
+# SLA_SEG
+# 0.10258560
+# 
+# corolla_diam_mm_SEG
+# 0.11685655
+# 
+# d13C_SEG
+# -0.04541372
+# 
+# msm_all
+# 0.28806691
+```
+
+Comparing PIv and PImd:
+
+```{r}
+cor.test(mean_PImd_by_trait$mean_PImd, mean_piv_by_trait$mean_PIv)
+#Families ranked as highly plastic using PIv are also ranked as highly plastic using PImd
+
+# 	Pearson's product-moment correlation
+# 
+# data:  mean_PImd_by_trait$mean_PImd and mean_piv_by_trait$mean_PIv
+# t = 37.809, df = 2, p-value = 0.0006988
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  0.9653800 0.9999861
+# sample estimates:
+#       cor 
+# 0.9993012
+
+#Traits ranked as highly plastic using PIv are also ranked as highly plastic using PImd
+
+#PIv and PImd are esentially the same
+```
+
+## **3. Within each trait, do paternal families differ in their plastic responses (i.e., is there genetic variation for plasticity)?**
+
+Do paternal families differ in their plastic responses to corolla area?
+
+```{r}
+library(lme4)
+library(lmerTest)
+
+model <- lmer(corolla_diam_mm_SEG ~ Year * Donor + (1|Recipient), data = BO_traits)
+anova(model)
+
+# Missing cells for: Year2023:DonorBO_032, Year2023:DonorBO_151.  
+# Interpret type III hypotheses with care.
+# Type III Analysis of Variance Table with Satterthwaite's method
+#            Sum Sq Mean Sq NumDF   DenDF F value  Pr(>F)  
+# Year        74.93  74.928     1 286.677  5.3354 0.02161 *
+# Donor      769.56  17.897    43  84.787  1.2744 0.17054  
+# Year:Donor 754.82  18.410    41 264.015  1.3109 0.10870  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+shapiro.test(residuals(model))
+# 	Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.9966, p-value = 0.5695
+plot(model)
+hist(BO_traits$corolla_diam_mm_SEG) #normal
+```
+
+Do paternal families differ in their plastic responses to SLA?
+
+```{r}
+
+model <- lmer(SLA_SEG ~ Year * Donor + (1|Recipient), data = BO_traits)
+anova(model)
+#Missing cells for: Year2023:DonorBO_106.  
+# Interpret type III hypotheses with care.
+# Type III Analysis of Variance Table with Satterthwaite's method
+#            Sum Sq Mean Sq NumDF   DenDF F value Pr(>F)
+# Year         8.77  8.7749     1 200.516  0.4272 0.5141
+# Donor      773.59 17.9905    43  50.084  0.8759 0.6700
+# Year:Donor 423.75 10.0894    42 182.587  0.4912 0.9961
+
+shapiro.test(residuals(model)) #not normal
+#	Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.83646, p-value < 2.2e-16
+plot(model)
+hist(BO_traits$SLA_SEG) #not normal
+```
+
+Do paternal families differ in their plastic responses to d13C?
+
+```{r}
+
+model <- lmer(d13C_SEG ~ Year * Donor + (1|Recipient), data = BO_traits)
+anova(model)
+
+# #Type III Analysis of Variance Table with Satterthwaite's method
+#            Sum Sq Mean Sq NumDF   DenDF F value   Pr(>F)    
+# Year       73.629  73.629     1 225.022 72.4513 2.44e-15 ***
+# Donor      86.492   2.011    43  65.242  1.9793 0.006216 ** 
+# Year:Donor 72.961   1.697    43 203.880  1.6696 0.010055 *  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+shapiro.test(residuals(model))
+#	Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.98972, p-value = 0.02196
+#not normal
+plot(model)
+hist(BO_traits$d13C_SEG) #not normal
+```
+
+Do paternal families differ in their plastic responses to msm?
+
+```{r}
+
+model <- lmer(msm_all ~ Year * Donor + (1|Recipient), data = BO_traits) #warning because there are a few missing datapoints, but its ok
+anova(model)
+
+#Type III Analysis of Variance Table with Satterthwaite's method
+#             Sum Sq Mean Sq NumDF DenDF F value  Pr(>F)  
+# Year         0.301  0.3013     1   155  0.1101 0.74044  
+# Donor      168.108  3.9095    43   155  1.4291 0.06006 .
+# Year:Donor 134.419  3.3605    40   155  1.2284 0.18850  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+shapiro.test(residuals(model))
+#	Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.96399, p-value = 9.597e-06
+#not normal
+plot(model)
+hist(BO_traits$msm_all) #not normal
+```
+
+## **4. Across traits, are some paternal families consistently more plastic than others?**
+
+Calculate the overall multivariate plasticity using PIv:
+
+```{r}
+mean_piv_by_family <- piv_df %>%
+  group_by(Donor) %>%
+  summarise(mean_PIv = mean(PIv, na.rm = TRUE))
+```
+
+Calculate the overall multivariate plasticity using PImd:
+
+```{r}
+mean_PImd_by_family <- PImd_df %>%
+  group_by(Donor) %>%
+  summarise(mean_PImd = mean(PImd, na.rm = TRUE))
+```
+
+```{r}
+cor.test(mean_PImd_by_family$mean_PImd, mean_piv_by_family$mean_PIv)
+
+# 	Pearson's product-moment correlation
+# 
+# data:  mean_PImd_by_family$mean_PImd and mean_piv_by_family$mean_PIv
+# t = 13.404, df = 42, p-value < 2.2e-16
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  0.8235307 0.9446824
+# sample estimates:
+#       cor 
+# 0.9002973
+
+```
+
+## **5. How is a paternal family's trait-specific plasticity as well as it's cross-trait (average) plasticity associated with breeding values for fitness?**
+
+```{r}
+
+BO22_BV<-read.csv("/Users/Helen/Desktop/nemo_field/aster/processed_data/BO22_bhat.Donor.mu.csv")
+BO22_BV <- BO22_BV %>%
+  rename(Donor = X) %>% 
+  rename(BV_W = bhat.Donor.mu) %>% 
+  mutate(Donor = sub(".*Donor", "", Donor))
+
+
+BO23_BV<-read.csv("/Users/Helen/Desktop/nemo_field/aster/processed_data/BO23_bhat.Donor.mu.csv")
+BO23_BV <- BO23_BV %>%
+  rename(Donor = X) %>%   
+  rename(BV_W = bhat.donor.mu) %>% 
+  mutate(Donor = sub(".*Donor", "", Donor))
+
+```
+
+Merged the two datasets by Donor for 2022
+
+```{r}
+merged <- BO22_BV %>%
+  select(Donor, BV_W) %>%       # keep only relevant columns
+  inner_join(mean_piv_by_family %>% 
+               select(Donor, mean_PIv),
+             by = "Donor")
+```
+
+See if BV(W) and Plasticity are correlated for 2022
+
+```{r}
+cor_pearson <- cor(merged$BV_W, merged$mean_PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged$BV_W, merged$mean_PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged$BV_W and merged$mean_PIv
+# t = 0.50149, df = 42, p-value = 0.6186
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2248808  0.3656556
+# sample estimates:
+#        cor 
+# 0.07715036  
+```
+
+Make a scatterplot of Breeding value for Fitness and mean absolute plasticity for 2022
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+#Merge datasets by Donor
+merged <- BO22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+   mean_piv_by_family %>% select(Donor, mean_PIv),
+    by = "Donor"
+  )
+
+#plot
+p <- ggplot(merged, aes(x = mean_PIv, y = BV_W)) +
+  geom_point(size = 3, alpha = 0.8) +
+  labs(
+    x = "Overall Plasticity",
+    y = "BO BV(W) 2022"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.title = element_text(face = "bold")
+  )
+
+print(p)
+
+ggsave("Figures/BO_BV(W)2022_plasticity.jpeg", #save the plot
+       plot = p, width = 8, height = 6, dpi = 700)
+```
+
+Merged the two datasets by Donor for 2023
+
+```{r}
+merged <- BO23_BV %>%
+  select(Donor, BV_W) %>%       # keep only relevant columns
+  inner_join(mean_piv_by_family %>% 
+               select(Donor, mean_PIv),
+             by = "Donor")
+```
+
+See if BV(W) and Plasticity are correlated in 2023
+
+```{r}
+cor_pearson <- cor(merged$BV_W, merged$mean_PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged$BV_W, merged$mean_PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged$BV_W and merged$mean_PIv
+# t = 0.77061, df = 42, p-value = 0.4453
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.1853004  0.4009026
+# sample estimates:
+#       cor 
+# 0.1180755 
+```
+
+Make a scatterplot of Breeding value for Fitness and mean absolute plasticity in 2023
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+#Merge datasets by Donor
+merged <- BO23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    mean_piv_by_family %>% select(Donor, mean_PIv),
+    by = "Donor"
+  )
+
+# --- Scatterplot ---
+p <- ggplot(merged, aes(x = mean_PIv, y = BV_W)) +
+  geom_point(size = 3, alpha = 0.8) +
+  labs(
+    x = "Overall plasticity",
+    y = "BO BV(W) 2023"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.title = element_text(face = "bold")
+  )
+
+print(p)
+
+ggsave("Figures/BO_BV(W)2023_plasticity.jpeg", #save the plot
+       plot = p, width = 8, height = 6, dpi = 700)
+```
+
+#### Determine if breeding values are correlated with any specific traits:
+
+See if BV(W) in 2022 and Plasticity in corolla diameter are correlated
+
+```{r}
+piv_df_corolla <- piv_df %>%
+  filter(Trait == "mean_corolla_diam_mm_SEG")
+
+merged_corolla <- BO22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_corolla %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_corolla$BV_W, merged_corolla$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_corolla$BV_W, merged_corolla$PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_corolla$BV_W and merged_corolla$PIv
+# t = 0.067739, df = 42, p-value = 0.9463
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2873201  0.3063815
+# sample estimates:
+#       cor 
+# 0.0104518
+```
+
+See if BV(W) and Plasticity in SLA are correlated
+
+```{r}
+piv_df_SLA <- piv_df %>%
+  filter(Trait == "mean_SLA_SEG")
+
+merged_SLA <- BO22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_SLA %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_SLA$BV_W, merged_SLA$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_SLA$BV_W, merged_SLA$PIv)
+
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_SLA$BV_W and merged_SLA$PIv
+# t = 0.40102, df = 42, p-value = 0.6904
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2395116  0.3521833
+# sample estimates:
+#        cor 
+# 0.06176035 
+```
+
+See if BV(W) and Plasticity in d13C are correlated
+
+```{r}
+piv_df_d13C <- piv_df %>%
+  filter(Trait == "mean_d13C_SEG")
+
+merged_d13C <- BO22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_d13C %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_d13C$BV_W, merged_d13C$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_d13C$BV_W, merged_d13C$PIv)
+
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_d13C$BV_W and merged_d13C$PIv
+# t = 0.60317, df = 42, p-value = 0.5496
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2099874  0.3791201
+# sample estimates:
+#        cor 
+# 0.09267009 
+
+```
+
+See if BV(W) and Plasticity in msm are correlated
+
+```{r}
+piv_df_msm <- piv_df %>%
+  filter(Trait == "mean_msm_all")
+
+merged_msm <- BO22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_msm %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_msm$BV_W, merged_msm$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_msm$BV_W, merged_msm$PIv)
+
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_msm$BV_W and merged_msm$PIv
+# t = 0.30336, df = 42, p-value = 0.7631
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2536436  0.3389332
+# sample estimates:
+#        cor 
+# 0.04675767 
+```
+
+Determine if breeding values are correlated with any specific traits: See if BV(W) in 2023 and Plasticity in corolla diameter are correlated
+
+```{r}
+piv_df_corolla <- piv_df %>%
+  filter(Trait == "mean_corolla_diam_mm_SEG")
+
+merged_corolla <- BO23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_corolla %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_corolla$BV_W, merged_corolla$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_corolla$BV_W, merged_corolla$PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_corolla$BV_W and merged_corolla$PIv
+# t = 0.20309, df = 42, p-value = 0.84
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2680513  0.3251782
+# sample estimates:
+#        cor 
+# 0.03132163 
+```
+
+See if BV(W) and Plasticity in SLA are correlated
+
+```{r}
+piv_df_SLA <- piv_df %>%
+  filter(Trait == "mean_SLA_SEG")
+
+merged_SLA <- BO23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_SLA %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_SLA$BV_W, merged_SLA$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_SLA$BV_W, merged_SLA$PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_SLA$BV_W and merged_SLA$PIv
+# t = -0.1286, df = 42, p-value = 0.8983
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.3148650  0.2786826
+# sample estimates:
+#         cor 
+# -0.01983919 
+```
+
+See if BV(W) and Plasticity in d13C are correlated
+
+```{r}
+piv_df_d13C <- piv_df %>%
+  filter(Trait == "mean_d13C_SEG")
+
+merged_d13C <- BO23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_d13C %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_d13C$BV_W, merged_d13C$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_d13C$BV_W, merged_d13C$PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_d13C$BV_W and merged_d13C$PIv
+# t = -0.13753, df = 42, p-value = 0.8913
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.3161057  0.2774113
+# sample estimates:
+#         cor 
+# -0.02121644
+```
+
+See if BV(W) and Plasticity in msm are correlated
+
+```{r}
+piv_df_msm <- piv_df %>%
+  filter(Trait == "mean_msm_all")
+
+merged_msm <- BO23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_msm %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_msm$BV_W, merged_msm$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_msm$BV_W, merged_msm$PIv)
+
+# 	Pearson's product-moment correlation
+# 
+# data:  merged_msm$BV_W and merged_msm$PIv
+# t = 0.9425, df = 42, p-value = 0.3513
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.1597900  0.4227361
+# sample estimates:
+#       cor 
+# 0.1439177
+```
+
+Linear Regression to determine if a correlation exists: \####################################################### Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and absolute plasticity are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ mean_PIv, data = merged)
+model_quad    <- lm(BV_W ~ mean_PIv + I(mean_PIv^2), data = merged)
+
+anova(model_linear, model_quad)
+
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ mean_PIv
+# Model 2: BV_W ~ mean_PIv + I(mean_PIv^2)
+#   Res.Df    RSS Df Sum of Sq     F Pr(>F)
+# 1     42 2.0793                          
+# 2     41 2.0793  1 9.017e-06 2e-04 0.9894
+
+##the linear model is better than the quadratic
+
+summary(model_linear)
+#Call:
+# lm(formula = BV_W ~ mean_PIv, data = merged)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -0.31353 -0.14221 -0.02386  0.08100  0.74839 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)   1.7520     0.0754  23.235   <2e-16 ***
+# mean_PIv      0.2936     0.5855   0.501    0.619    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.2225 on 42 degrees of freedom
+# Multiple R-squared:  0.005952,	Adjusted R-squared:  -0.01772 
+# F-statistic: 0.2515 on 1 and 42 DF,  p-value: 0.6186
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear...
+
+shapiro.test(residuals(model_linear)) #not normal
+shapiro.test(residuals(model_quad)) #not normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in corolla diameter are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_corolla)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_corolla)
+
+anova(model_linear, model_quad)
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df     RSS Df Sum of Sq      F Pr(>F)
+# 1     42 0.51208                           
+# 2     41 0.49935  1  0.012724 1.0448 0.3127
+
+summary(model_linear)
+
+# Call:
+# lm(formula = BV_W ~ PIv, data = merged_corolla)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -0.14548 -0.08550 -0.02175  0.05684  0.34568 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)  0.62990    0.03177  19.829   <2e-16 ***
+# PIv          0.04844    0.23851   0.203     0.84    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.1104 on 42 degrees of freedom
+# Multiple R-squared:  0.000981,	Adjusted R-squared:  -0.02281 
+# F-statistic: 0.04124 on 1 and 42 DF,  p-value: 0.84
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear..
+
+shapiro.test(residuals(model_linear)) #non-normal
+shapiro.test(residuals(model_quad)) #non-normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in d13C are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_d13C)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_d13C)
+
+anova(model_linear, model_quad)
+#Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df     RSS Df Sum of Sq      F Pr(>F)
+# 1     42 0.51235                           
+# 2     41 0.50572  1 0.0066292 0.5374 0.4677
+
+summary(model_linear)
+# Call:
+# lm(formula = BV_W ~ PIv, data = merged_d13C)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -0.14156 -0.08498 -0.02323  0.05564  0.34206 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)  0.63190    0.03036  20.812   <2e-16 ***
+# PIv         -0.07657    0.55675  -0.138    0.891    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.1104 on 42 degrees of freedom
+# Multiple R-squared:  0.0004501,	Adjusted R-squared:  -0.02335 
+# F-statistic: 0.01891 on 1 and 42 DF,  p-value: 0.8913
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear
+
+shapiro.test(residuals(model_linear)) #not normal
+shapiro.test(residuals(model_quad)) #not normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in msm are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_msm)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_msm)
+
+anova(model_linear, model_quad)
+# Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df     RSS Df Sum of Sq      F  Pr(>F)  
+# 1     42 0.50196                              
+# 2     41 0.44756  1  0.054402 4.9837 0.03111 *
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+summary(model_linear)
+
+#Call:
+# lm(formula = BV_W ~ PIv, data = merged_msm)
+# 
+# Residuals:
+#       Min        1Q    Median        3Q       Max 
+# -0.135492 -0.087382 -0.007078  0.052905  0.307246 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)  0.61212    0.02969  20.615   <2e-16 ***
+# PIv          0.08213    0.08714   0.943    0.351    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.1093 on 42 degrees of freedom
+# Multiple R-squared:  0.02071,	Adjusted R-squared:  -0.002604 
+# F-statistic: 0.8883 on 1 and 42 DF,  p-value: 0.3513
+
+summary(model_quad)
+
+# Call:
+# lm(formula = BV_W ~ PIv + I(PIv^2), data = merged_msm)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -0.18027 -0.07502 -0.03331  0.05905  0.20553 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)  0.67230    0.03914  17.177   <2e-16 ***
+# PIv         -0.44845    0.25184  -1.781   0.0824 .  
+# I(PIv^2)     0.77695    0.34803   2.232   0.0311 *  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.1045 on 41 degrees of freedom
+# Multiple R-squared:  0.1268,	Adjusted R-squared:  0.08425 
+# F-statistic: 2.978 on 2 and 41 DF,  p-value: 0.062
+
+#THE QUADRATIC MODEL DETECTS OPPTOMISING SELECTION FOR msm
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear
+
+shapiro.test(residuals(model_linear)) #not normal
+shapiro.test(residuals(model_quad)) #not normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in SLA are correlated:
+
+```{r}
+library(car)
+library(lmtest)
+
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_SLA)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_SLA)
+
+anova(model_linear, model_quad)
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df     RSS Df Sum of Sq      F Pr(>F)
+# 1     42 0.51238                           
+# 2     41 0.51096  1 0.0014157 0.1136 0.7378
+
+summary(model_linear)
+# Call:
+# lm(formula = BV_W ~ PIv, data = merged_SLA)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -0.14456 -0.08564 -0.02018  0.05418  0.34543 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)  0.63813    0.02697  23.657   <2e-16 ***
+# PIv         -0.02479    0.19277  -0.129    0.898    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.1105 on 42 degrees of freedom
+# Multiple R-squared:  0.0003936,	Adjusted R-squared:  -0.02341 
+# F-statistic: 0.01654 on 1 and 42 DF,  p-value: 0.8983
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear
+
+shapiro.test(residuals(model_linear)) #not normal
+shapiro.test(residuals(model_quad)) #not normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+# HASTINGS RANCH
+
+Read in the data
+
+```{r}
+HR_22 <- read_csv(here::here("data_sheets/compiled_sheets/HR_compiledsheet_full_2022.csv"))
+HR_23 <- read_csv(here::here("data_sheets/compiled_sheets/HR_compiledsheet_full_2023.csv"))
+```
+
+Create a dataset
+
+```{r}
+HR22_trait <- HR_22 %>%
+  select(Donor, Recipient, F_plant, corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all) %>% #including maternal and paternal parents
+  mutate(Year = "2022") #adding year column
+
+HR23_trait <- HR_23 %>%
+  filter(Gen == "G1") %>%    # just include generation 1
+  select(Donor, Recipient, F_plant, corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all) %>% #including maternal and paternal parents
+  mutate(Year = "2023") #adding year column
+
+#REMOVING THIS ONE ODD OUTLIER WHICH WAS LIKELY A MISTAKE
+HR23_trait <- HR23_trait %>%
+  mutate(SLA_SEG = ifelse(Donor == "HR_194" &
+                          Recipient == "HR_098",
+                          NA,
+                          SLA_SEG))
+
+# combine years
+HR_traits <- bind_rows(HR22_trait, HR23_trait) %>%
+  filter(F_plant == "TRUE")
+```
+
+Get paternal family means
+
+```{r}
+fam_means <- HR_traits %>%
+  group_by(Donor, Year) %>% #all calculations done separately for each paternal family within each year
+  summarise(
+    across(
+      c(corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all),
+      ~ mean(.x, na.rm = TRUE), # get the family mean corolla diameter for each Donor × Year, remove NAs
+      .names = "mean_{.col}"
+    ),
+    .groups = "drop" #ungroups the results
+  )
+
+```
+
+Assign colors for Increasing and Decreasing
+
+```{r}
+dirs_wide <- fam_means %>%
+  pivot_wider(
+    names_from = Year,
+    values_from = starts_with("mean_"),
+    names_sep = "_"
+  ) %>%
+  mutate(
+    dir_corolla_diam_mm_SEG = if_else(mean_corolla_diam_mm_SEG_2023 >
+                                        mean_corolla_diam_mm_SEG_2022,
+                                      "increase", "decrease"),
+    dir_SLA_SEG  = if_else(mean_SLA_SEG_2023  > mean_SLA_SEG_2022,
+                           "increase", "decrease"),
+    dir_d13C_SEG = if_else(mean_d13C_SEG_2023 > mean_d13C_SEG_2022,
+                           "increase", "decrease"),
+    dir_msm_all  = if_else(mean_msm_all_2023  > mean_msm_all_2022,
+                           "increase", "decrease")
+  ) %>%
+  select(Donor, starts_with("dir_"))
+
+#Long format for plotting
+fam_long <- fam_means %>%
+  pivot_longer(
+    cols = starts_with("mean_"),
+    names_to  = "Trait",
+    values_to = "mean_value"
+  )
+
+dirs_long <- dirs_wide %>%
+  pivot_longer(
+    cols = starts_with("dir_"),
+    names_to  = "Trait",
+    values_to = "dir"
+  ) %>%
+  mutate(
+    Trait = case_when(
+      Trait == "dir_corolla_diam_mm_SEG" ~ "corolla diameter (mm)",
+      Trait == "dir_SLA_SEG"             ~ "specific leaf area (mm/mg)",
+      Trait == "dir_d13C_SEG"            ~ "δ13C (‰)",
+      Trait == "dir_msm_all"             ~ "seed mass (mg)",
+      TRUE ~ Trait
+    )
+  )
+```
+
+Plot the data
+
+```{r}
+plot_dat <- fam_long %>%
+  mutate(
+    Trait = case_when(
+      Trait == "mean_corolla_diam_mm_SEG" ~ "corolla diameter (mm)",
+      Trait == "mean_SLA_SEG"             ~ "specific leaf area (mm/mg)",
+      Trait == "mean_d13C_SEG"            ~ "δ13C (‰)",
+      Trait == "mean_msm_all"             ~ "seed mass (mg)",
+      TRUE ~ Trait
+    )
+  ) %>%
+  left_join(dirs_long, by = c("Donor", "Trait"))
+
+#One plot, all traits, blue = increase, red = decrease
+p <- ggplot(plot_dat,
+            aes(x = Year, y = mean_value,
+                group = Donor, color = dir)) +
+  geom_line(alpha = 0.9) +
+  geom_point(size = 2.5) +
+  scale_x_discrete(expand = c(0.05, 0)) +
+  scale_color_manual(
+    values = c(increase = "#2c7fb8", decrease = "#d95f0e"),
+    name   = "Change 2022 → 2023"
+  ) +
+  facet_wrap(~ Trait, scales = "free_y") +
+  labs(x = "Year", y = "HR paternal family mean") +
+  theme_bw(base_size = 18) +
+  theme(
+    legend.position = "bottom",
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 18),
+    axis.text.x  = element_text(size = 16),
+    axis.text.y  = element_text(size = 16)
+  )
+
+p
+
+ggsave("Figures/HR_reaction_norms_traits.jpeg", #save the plot
+       plot = p, width = 8, height = 6, dpi = 700)
+```
+
+Pivot the dataframe so each family shows trait means
+
+```{r}
+fam_wide <- fam_means %>%
+  tidyr::pivot_wider(
+    id_cols = Donor,
+    names_from = Year,
+    values_from = c(mean_corolla_diam_mm_SEG, mean_SLA_SEG, mean_d13C_SEG, mean_msm_all)
+  )
+```
+
+## **1. Is there plasticity in the traits of interest (corolla diameter, SLA, d13C, msm)?**
+
+YES. Spearman's Rank Correlations. We will also observe plasticity using the plasticity index as well.
+
+```{r}
+# Spearman correlation for corolla area
+cor.test(fam_wide$mean_corolla_diam_mm_SEG_2022, fam_wide$mean_corolla_diam_mm_SEG_2023, method = "spearman")
+#	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_corolla_diam_mm_SEG_2022 and fam_wide$mean_corolla_diam_mm_SEG_2023
+# S = 13074, p-value = 0.1965
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#       rho 
+# 0.1937095 
+
+
+# Spearman correlation for SLA **SIGNIFICANT CORRELATION**
+cor.test(fam_wide$mean_SLA_SEG_2022, fam_wide$mean_SLA_SEG_2023, method = "spearman")
+
+# 	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_SLA_SEG_2022 and fam_wide$mean_SLA_SEG_2023
+# S = 15466, p-value = 0.9022
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#         rho 
+# -0.01884058
+
+# Spearman correlation for d13C
+cor.test(fam_wide$mean_d13C_SEG_2022, fam_wide$mean_d13C_SEG_2023, method = "spearman")
+# 	Spearman's rank correlation rho
+# 
+# data:  fam_wide$mean_d13C_SEG_2022 and fam_wide$mean_d13C_SEG_2023
+# S = 5570.4, p-value = 3.065e-06
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#       rho 
+# 0.6330457 
+
+# Spearman correlation for msm
+cor.test(fam_wide$mean_msm_all_2022, fam_wide$mean_msm_all_2023, method = "spearman")
+
+#	Spearman's rank correlation rho
+#
+# data:  fam_wide$mean_msm_all_2022 and fam_wide$mean_msm_all_2023
+# S = 11998, p-value = 0.08106
+# alternative hypothesis: true rho is not equal to 0
+# sample estimates:
+#       rho 
+# 0.2600678
+```
+
+## **2. Do traits differ in how plastic they are, on average, across genotypes?**
+
+Calculate how much two traits differ from one another using PIv (Valladares et al., 2006):
+
+```{r}
+piv_df <- fam_long %>%
+  group_by(Donor, Trait) %>%
+  summarise(
+    max_mean = max(mean_value, na.rm = TRUE), #determine the maximum donor mean
+    min_mean = min(mean_value, na.rm = TRUE), #determine the minimum donor mean
+    PIv = (max_mean - min_mean) / max_mean, #calculate the PIv to determine how much traits differ from eachother
+    .groups = "drop"
+  )
+```
+
+Calculate plasticity by trait using PIv:
+
+```{r}
+mean_piv_by_trait <- piv_df %>%
+  group_by(Trait) %>%
+  summarise(mean_PIv = mean(PIv, na.rm = TRUE))
+
+
+# mean_SLA_SEG
+# 0.12559425
+# 
+# mean_corolla_diam_mm_SEG
+# 0.05634288
+# 
+# mean_d13C_SEG
+# -0.01180732
+# 
+# mean_msm_all
+# 0.21584238
+
+
+#Mean seed mass is most plastic
+```
+
+Calculate how much traits differ from one another using Plmd (used for non-normal distributions):
+
+SLA and msm were slightly non-normal based on histograms earlier.
+
+```{r}
+
+HR_traits_long <- HR_traits %>%
+  pivot_longer(
+    cols = c(corolla_diam_mm_SEG, SLA_SEG, d13C_SEG, msm_all),
+    names_to = "Trait",
+    values_to = "value"
+  )
+
+PImd_df <- HR_traits_long %>%
+  group_by(Donor, Trait, Year) %>%
+  summarise(
+    median_value = median(value, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+PImd_df <- PImd_df %>%
+  group_by(Donor, Trait) %>%
+  summarise(
+    max_median = max(median_value, na.rm = TRUE),
+    min_median = min(median_value, na.rm = TRUE),
+    PImd = (max_median - min_median) / max_median,
+    .groups = "drop"
+  )
+```
+
+Do traits differ in how plastic they are, on average, across genotypes? Calculate plasticity by trait:
+
+```{r}
+mean_PImd_by_trait <- PImd_df %>%
+  group_by(Trait) %>%
+  summarise(mean_PImd = mean(PImd, na.rm = TRUE))
+
+# SLA_SEG
+# 0.13051724
+# 
+# corolla_diam_mm_SEG
+# 0.05848524
+# 
+# d13C_SEG
+# -0.01212758
+# 
+# msm_all
+# 0.21967071
+```
+
+Comparing PIv and PImd:
+
+```{r}
+cor.test(mean_PImd_by_trait$mean_PImd, mean_piv_by_trait$mean_PIv)
+#Families ranked as highly plastic using PIv are also ranked as highly plastic using PImd
+
+# 	Pearson's product-moment correlation
+# 
+# data:  mean_PImd_by_trait$mean_PImd and mean_piv_by_trait$mean_PIv
+# t = 108.27, df = 2, p-value = 8.53e-05
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  0.9957101 0.9999983
+# sample estimates:
+#       cor 
+# 0.9999147 
+
+#Traits ranked as highly plastic using PIv are also ranked as highly plastic using PImd
+
+#PIv and PImd are esentially the same
+```
+
+## **3. Within each trait, do paternal families differ in their plastic responses (i.e., is there genetic variation for plasticity)?**
+
+Do paternal families differ in their plastic responses to corolla area?
+
+```{r}
+library(lme4)
+library(lmerTest)
+
+model <- lmer(corolla_diam_mm_SEG ~ Year * Donor + (1|Recipient), data = HR_traits)
+anova(model) #Singular
+
+#Type III Analysis of Variance Table with Satterthwaite's method
+#            Sum Sq Mean Sq NumDF DenDF F value    Pr(>F)    
+# Year       110.06 110.060     1   575 13.9949 0.0002017 ***
+# Donor      573.22  12.738    45   575  1.6197 0.0077630 ** 
+# Year:Donor 322.19   7.160    45   575  0.9104 0.6405154    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+shapiro.test(residuals(model))
+#Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.99199, p-value = 0.001158
+
+plot(model)
+hist(HR_traits$corolla_diam_mm_SEG) #normal
+```
+
+Do paternal families differ in their plastic responses to SLA?
+
+```{r}
+
+model <- lmer(SLA_SEG ~ Year * Donor + (1|Recipient), data = HR_traits)
+anova(model)
+# Type III Analysis of Variance Table with Satterthwaite's method
+#            Sum Sq Mean Sq NumDF  DenDF F value   Pr(>F)   
+# Year       295.04 295.044     1 433.31  9.9653 0.001707 **
+# Donor      565.09  12.558    45  81.40  0.4241 0.998894   
+# Year:Donor 588.46  13.374    44 415.94  0.4517 0.999111   
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+shapiro.test(residuals(model)) #not normal
+#Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.70759, p-value < 2.2e-16
+plot(model)
+hist(HR_traits$SLA_SEG) #not normal
+```
+
+Do paternal families differ in their plastic responses to d13C?
+
+```{r}
+
+model <- lmer(d13C_SEG ~ Year * Donor + (1|Recipient), data = HR_traits)
+anova(model)
+
+#Type III Analysis of Variance Table with Satterthwaite's method
+#            Sum Sq Mean Sq NumDF  DenDF F value    Pr(>F)    
+# Year       10.501 10.5011     1 500.33 25.4254 6.440e-07 ***
+# Donor      51.483  1.1441    45  92.08  2.7700 1.811e-05 ***
+# Year:Donor 17.465  0.3969    44 494.87  0.9611    0.5458    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+shapiro.test(residuals(model))
+#	Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.99353, p-value = 0.007075
+#not normal
+plot(model)
+hist(HR_traits$d13C_SEG) #not normal
+```
+
+Do paternal families differ in their plastic responses to msm?
+
+```{r}
+
+model <- lmer(msm_all ~ Year * Donor + (1|Recipient), data = HR_traits) #warning because there are a few missing datapoints, but its ok
+anova(model)
+
+# Type III Analysis of Variance Table with Satterthwaite's method
+#            Sum Sq Mean Sq NumDF  DenDF F value    Pr(>F)    
+# Year       21.758 21.7584     1 447.16 24.2113 1.216e-06 ***
+# Donor      52.373  1.1638    45  93.49  1.2950   0.14736    
+# Year:Donor 62.880  1.3973    45 440.37  1.5549   0.01486 *  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+shapiro.test(residuals(model))
+#
+# 	Shapiro-Wilk normality test
+# 
+# data:  residuals(model)
+# W = 0.94147, p-value = 1.532e-14
+#not normal
+plot(model)
+hist(HR_traits$msm_all) #not normal
+```
+
+## **4. Across traits, are some paternal families consistently more plastic than others?**
+
+Calculate the overall multivariate plasticity using PIv:
+
+```{r}
+mean_piv_by_family <- piv_df %>%
+  group_by(Donor) %>%
+  summarise(mean_PIv = mean(PIv, na.rm = TRUE))
+```
+
+Calculate the overall multivariate plasticity using PImd:
+
+```{r}
+mean_PImd_by_family <- PImd_df %>%
+  group_by(Donor) %>%
+  summarise(mean_PImd = mean(PImd, na.rm = TRUE))
+```
+
+```{r}
+cor.test(mean_PImd_by_family$mean_PImd, mean_piv_by_family$mean_PIv)
+
+#Pearson's product-moment correlation
+# 
+# data:  mean_PImd_by_family$mean_PImd and mean_piv_by_family$mean_PIv
+# t = 6.9007, df = 44, p-value = 1.599e-08
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  0.5446230 0.8362254
+# sample estimates:
+#       cor 
+# 0.7209385
+
+```
+
+## **5. How is a paternal family's trait-specific plasticity as well as it's cross-trait (average) plasticity associated with breeding values for fitness?**
+
+```{r}
+
+HR22_BV<-read.csv("/Users/Helen/Desktop/nemo_field/aster/processed_data/HR22_bhat.Donor.mu.csv")
+HR22_BV <- HR22_BV %>%
+  rename(Donor = X) %>% 
+  rename(BV_W = bhat.Donor.mu) %>% 
+  mutate(Donor = sub(".*Donor", "", Donor))
+
+
+HR23_BV<-read.csv("/Users/Helen/Desktop/nemo_field/aster/processed_data/HR23_bhat.Donor.mu.csv")
+HR23_BV <- HR23_BV %>%
+  rename(Donor = X) %>%   
+  rename(BV_W = bhat.donor.mu) %>% 
+  mutate(Donor = sub(".*Donor", "", Donor))
+
+```
+
+Merged the two datasets by Donor for 2022
+
+```{r}
+merged <- HR22_BV %>%
+  select(Donor, BV_W) %>%       # keep only relevant columns
+  inner_join(mean_piv_by_family %>% 
+               select(Donor, mean_PIv),
+             by = "Donor")
+```
+
+See if BV(W) and Plasticity are correlated for 2022
+
+```{r}
+cor_pearson <- cor(merged$BV_W, merged$mean_PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged$BV_W, merged$mean_PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged$BV_W and merged$mean_PIv
+# t = 0.017918, df = 44, p-value = 0.9858
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2878225  0.2927697
+# sample estimates:
+#         cor 
+# 0.002701258
+```
+
+Make a scatterplot of Breeding value for Fitness and mean absolute plasticity for 2022
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+#Merge datasets by Donor
+merged <- HR22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+   mean_piv_by_family %>% select(Donor, mean_PIv),
+    by = "Donor"
+  )
+
+#plot
+p <- ggplot(merged, aes(x = mean_PIv, y = BV_W)) +
+  geom_point(size = 3, alpha = 0.8) +
+  labs(
+    x = "Overall Plasticity",
+    y = "HR BV(W) 2022"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.title = element_text(face = "bold")
+  )
+
+print(p)
+
+ggsave("Figures/HR_BV(W)2022_plasticity.jpeg", #save the plot
+       plot = p, width = 8, height = 6, dpi = 700)
+```
+
+Merged the two datasets by Donor for 2023
+
+```{r}
+merged <- HR23_BV %>%
+  select(Donor, BV_W) %>%       # keep only relevant columns
+  inner_join(mean_piv_by_family %>% 
+               select(Donor, mean_PIv),
+             by = "Donor")
+```
+
+See if BV(W) and Plasticity are correlated in 2023
+
+```{r}
+cor_pearson <- cor(merged$BV_W, merged$mean_PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged$BV_W, merged$mean_PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged$BV_W and merged$mean_PIv
+# t = -1.9212, df = 44, p-value = 0.06121
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.52601066  0.01316897
+# sample estimates:
+#        cor 
+# -0.2781926 
+```
+
+Make a scatterplot of Breeding value for Fitness and mean absolute plasticity in 2023
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+#Merge datasets by Donor
+merged <- HR23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    mean_piv_by_family %>% select(Donor, mean_PIv),
+    by = "Donor"
+  )
+
+#Scatterplot
+p <- ggplot(merged, aes(x = mean_PIv, y = BV_W)) +
+  geom_point(size = 3, alpha = 0.8) +
+  labs(
+    x = "Overall plasticity",
+    y = "HR BV(W) 2023"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.title = element_text(face = "bold")
+  )
+
+print(p)
+
+ggsave("Figures/HR_BV(W)2023_plasticity.jpeg", #save the plot
+       plot = p, width = 8, height = 6, dpi = 700)
+```
+
+#### Determine if breeding values are correlated with any specific traits:
+
+See if BV(W) in 2022 and Plasticity in corolla diameter are correlated
+
+```{r}
+piv_df_corolla <- piv_df %>%
+  filter(Trait == "mean_corolla_diam_mm_SEG")
+
+merged_corolla <- HR22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_corolla %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_corolla$BV_W, merged_corolla$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_corolla$BV_W, merged_corolla$PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_corolla$BV_W and merged_corolla$PIv
+# t = 0.98654, df = 44, p-value = 0.3293
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.1495778  0.4194916
+# sample estimates:
+#      cor 
+# 0.147108
+```
+
+See if BV(W) and Plasticity in SLA are correlated
+
+```{r}
+piv_df_SLA <- piv_df %>%
+  filter(Trait == "mean_SLA_SEG")
+
+merged_SLA <- HR22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_SLA %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_SLA$BV_W, merged_SLA$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_SLA$BV_W, merged_SLA$PIv)
+
+
+# 	Pearson's product-moment correlation
+# 
+# data:  merged_SLA$BV_W and merged_SLA$PIv
+# t = 0.59632, df = 44, p-value = 0.554
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2061176  0.3702132
+# sample estimates:
+#        cor 
+# 0.08953802  
+```
+
+See if BV(W) and Plasticity in d13C are correlated
+
+```{r}
+piv_df_d13C <- piv_df %>%
+  filter(Trait == "mean_d13C_SEG")
+
+merged_d13C <- HR22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_d13C %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_d13C$BV_W, merged_d13C$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_d13C$BV_W, merged_d13C$PIv)
+
+
+#Pearson's product-moment correlation
+# 
+# data:  merged_d13C$BV_W and merged_d13C$PIv
+# t = -0.40086, df = 44, p-value = 0.6905
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.3445858  0.2340750
+# sample estimates:
+#         cor 
+# -0.06032197 
+
+```
+
+See if BV(W) and Plasticity in msm are correlated
+
+```{r}
+piv_df_msm <- piv_df %>%
+  filter(Trait == "mean_msm_all")
+
+merged_msm <- HR22_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_msm %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_msm$BV_W, merged_msm$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_msm$BV_W, merged_msm$PIv)
+
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_msm$BV_W and merged_msm$PIv
+# t = -0.66727, df = 44, p-value = 0.5081
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.3793654  0.1958999
+# sample estimates:
+#        cor 
+# -0.1000902 
+```
+
+Determine if breeding values are correlated with any specific traits: See if BV(W) in 2023 and Plasticity in corolla diameter are correlated
+
+```{r}
+piv_df_corolla <- piv_df %>%
+  filter(Trait == "mean_corolla_diam_mm_SEG")
+
+merged_corolla <- HR23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_corolla %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_corolla$BV_W, merged_corolla$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_corolla$BV_W, merged_corolla$PIv)
+
+# 	Pearson's product-moment correlation
+# 
+# data:  merged_corolla$BV_W and merged_corolla$PIv
+# t = -2.0535, df = 44, p-value = 0.046
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.539692335 -0.005937915
+# sample estimates:
+#        cor 
+# -0.2957262
+```
+
+See if BV(W) and Plasticity in SLA are correlated
+
+```{r}
+piv_df_SLA <- piv_df %>%
+  filter(Trait == "mean_SLA_SEG")
+
+merged_SLA <- HR23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_SLA %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_SLA$BV_W, merged_SLA$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_SLA$BV_W, merged_SLA$PIv)
+
+#Pearson's product-moment correlation
+# 
+# data:  merged_SLA$BV_W and merged_SLA$PIv
+# t = -0.61176, df = 44, p-value = 0.5438
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.3722109  0.2038980
+# sample estimates:
+#        cor 
+# -0.0918359
+```
+
+See if BV(W) and Plasticity in d13C are correlated
+
+```{r}
+piv_df_d13C <- piv_df %>%
+  filter(Trait == "mean_d13C_SEG")
+
+merged_d13C <- HR23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_d13C %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_d13C$BV_W, merged_d13C$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_d13C$BV_W, merged_d13C$PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_d13C$BV_W and merged_d13C$PIv
+# t = -1.8585, df = 44, p-value = 0.0698
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.51940696  0.02225247
+# sample estimates:
+#        cor 
+# -0.2697884 
+```
+
+See if BV(W) and Plasticity in msm are correlated
+
+```{r}
+piv_df_msm <- piv_df %>%
+  filter(Trait == "mean_msm_all")
+
+merged_msm <- HR23_BV %>%
+  select(Donor, BV_W) %>% 
+  inner_join(
+    piv_df_msm %>% select(Donor, PIv),
+    by = "Donor"
+  )
+
+cor_pearson <- cor(merged_msm$BV_W, merged_msm$PIv, use = "complete.obs")
+cor_pearson
+
+cor.test(merged_msm$BV_W, merged_msm$PIv)
+
+#	Pearson's product-moment correlation
+# 
+# data:  merged_msm$BV_W and merged_msm$PIv
+# t = -1.2755, df = 44, p-value = 0.2088
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.4542278  0.1073538
+# sample estimates:
+#        cor 
+# -0.1888291 
+```
+
+Linear Regression to determine if a correlation exists: \####################################################### Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and absolute plasticity are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ mean_PIv, data = merged)
+model_quad    <- lm(BV_W ~ mean_PIv + I(mean_PIv^2), data = merged)
+
+anova(model_linear, model_quad)
+
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ mean_PIv
+# Model 2: BV_W ~ mean_PIv + I(mean_PIv^2)
+#   Res.Df    RSS Df  Sum of Sq     F Pr(>F)
+# 1     44 23.079                           
+# 2     43 23.079  1 0.00026648 5e-04 0.9823
+
+##the linear model is better than the quadratic
+
+summary(model_linear)
+#Call:
+# lm(formula = BV_W ~ mean_PIv, data = merged)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -1.08929 -0.50429 -0.09806  0.39300  1.65211 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)   3.2730     0.2749  11.906 2.36e-15 ***
+# mean_PIv     -5.0437     2.6254  -1.921   0.0612 .  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.7242 on 44 degrees of freedom
+# Multiple R-squared:  0.07739,	Adjusted R-squared:  0.05642 
+# F-statistic: 3.691 on 1 and 44 DF,  p-value: 0.06121
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear...
+
+shapiro.test(residuals(model_linear)) # normal enough
+shapiro.test(residuals(model_quad)) #not normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in corolla diameter are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_corolla)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_corolla)
+
+anova(model_linear, model_quad)
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df    RSS Df Sum of Sq      F Pr(>F)
+# 1     44 22.827                           
+# 2     43 22.822  1 0.0048591 0.0092 0.9242
+
+summary(model_linear)
+
+#Call:
+# lm(formula = BV_W ~ PIv, data = merged_corolla)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -1.12925 -0.63845 -0.00587  0.46522  1.74637 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)   3.0618     0.1711  17.896   <2e-16 ***
+# PIv          -4.8887     2.3807  -2.053    0.046 *  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.7203 on 44 degrees of freedom
+# Multiple R-squared:  0.08745,	Adjusted R-squared:  0.06671 
+# F-statistic: 4.217 on 1 and 44 DF,  p-value: 0.046
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear..
+
+shapiro.test(residuals(model_linear)) #non-normal
+shapiro.test(residuals(model_quad)) #non-normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in d13C are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_d13C)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_d13C)
+
+anova(model_linear, model_quad)
+# Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df    RSS Df Sum of Sq      F Pr(>F)
+# 1     44 23.194                           
+# 2     43 23.190  1 0.0038544 0.0071  0.933
+summary(model_linear)
+#Call:
+# lm(formula = BV_W ~ PIv, data = merged_d13C)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -0.89008 -0.59861 -0.09624  0.41682  2.14961 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)    2.494      0.190  13.127   <2e-16 ***
+# PIv          -24.715     13.298  -1.858   0.0698 .  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.726 on 44 degrees of freedom
+# Multiple R-squared:  0.07279,	Adjusted R-squared:  0.05171 
+# F-statistic: 3.454 on 1 and 44 DF,  p-value: 0.0698
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear
+
+shapiro.test(residuals(model_linear)) #not normal
+shapiro.test(residuals(model_quad)) #not normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in msm are correlated:
+
+```{r}
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_msm)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_msm)
+
+anova(model_linear, model_quad)
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df    RSS Df Sum of Sq      F Pr(>F)
+# 1     44 24.123                           
+# 2     43 23.950  1   0.17317 0.3109   0.58
+
+summary(model_linear)
+
+# Call:
+# lm(formula = BV_W ~ PIv, data = merged_msm)
+# 
+# Residuals:
+#     Min      1Q  Median      3Q     Max 
+# -1.0598 -0.6138 -0.1078  0.4531  1.7651 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)   3.0319     0.2213  13.700   <2e-16 ***
+# PIv          -1.1376     0.8919  -1.275    0.209    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.7404 on 44 degrees of freedom
+# Multiple R-squared:  0.03566,	Adjusted R-squared:  0.01374 
+# F-statistic: 1.627 on 1 and 44 DF,  p-value: 0.2088
+
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear
+
+shapiro.test(residuals(model_linear)) #not normal
+shapiro.test(residuals(model_quad)) #normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```
+
+Looking at a linear and quadratic model to determine if breeding value for fitness in 2023 and plasticity in SLA are correlated:
+
+```{r}
+library(car)
+library(lmtest)
+
+
+model_linear  <- lm(BV_W ~ PIv, data = merged_SLA)
+model_quad    <- lm(BV_W ~ PIv + I(PIv^2), data = merged_SLA)
+
+anova(model_linear, model_quad)
+#Analysis of Variance Table
+# 
+# Model 1: BV_W ~ PIv
+# Model 2: BV_W ~ PIv + I(PIv^2)
+#   Res.Df    RSS Df Sum of Sq      F  Pr(>F)  
+# 1     44 24.804                              
+# 2     43 23.169  1     1.635 3.0345 0.08866 .
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+summary(model_linear)
+# Call:
+# lm(formula = BV_W ~ PIv, data = merged_SLA)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -0.96057 -0.63119 -0.07697  0.42011  1.97130 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)   2.9015     0.2184  13.288   <2e-16 ***
+# PIv          -0.9168     1.4986  -0.612    0.544    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.7508 on 44 degrees of freedom
+# Multiple R-squared:  0.008434,	Adjusted R-squared:  -0.0141 
+# F-statistic: 0.3742 on 1 and 44 DF,  p-value: 0.5438
+
+summary(model_quad)
+
+# Call:
+# lm(formula = BV_W ~ PIv + I(PIv^2), data = merged_SLA)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -1.07266 -0.57474 -0.02669  0.33974  1.84746 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)    2.549      0.294   8.672 5.42e-11 ***
+# PIv            6.666      4.593   1.451   0.1539    
+# I(PIv^2)     -28.272     16.230  -1.742   0.0887 .  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.734 on 43 degrees of freedom
+# Multiple R-squared:  0.0738,	Adjusted R-squared:  0.03072 
+# F-statistic: 1.713 on 2 and 43 DF,  p-value: 0.1924
+
+plot(model_linear)
+plot(model_quad)
+
+#vif(model_linear)
+vif(model_quad) #multicolinear
+
+shapiro.test(residuals(model_linear)) #not normal
+shapiro.test(residuals(model_quad)) #not normal
+
+bptest(model_linear)
+bptest(model_quad)
+
+outlierTest(model_linear)
+outlierTest(model_quad)
+```

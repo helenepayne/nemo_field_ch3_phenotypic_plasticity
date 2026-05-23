@@ -1,0 +1,13 @@
+Site,Generation,Year,Fitness,SE,Type
+Angelo Coast (AC),Parental estimate,2022,14.86,0.57,estimate
+Angelo Coast (AC),Parental estimate,2023,5.83,0.52,estimate
+Angelo Coast (AC),Progeny estimate,2023,5.67,1.70,estimate
+Bodega Bay (BB),Parental estimate,2022,1.72,0.20,estimate
+Bodega Bay (BB),Parental estimate,2023,14.93,1.27,estimate
+Bodega Bay (BB),Progeny estimate,2023,15.30,6.68,estimate
+Blue Oak (BO),Parental estimate,2022,1.77,0.16,estimate
+Blue Oak (BO),Parental estimate,2023,0.62,0.10,estimate
+Blue Oak (BO),Progeny estimate,2023,0.49,0.28,estimate
+Hastings Ranch (HR),Parental estimate,2022,13.93,0.40,estimate
+Hastings Ranch (HR),Parental estimate,2023,5.79,0.30,estimate
+Hastings Ranch (HR),Progeny estimate,2023,9.39,1.20,estimate
