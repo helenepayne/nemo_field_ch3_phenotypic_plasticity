@@ -224,6 +224,32 @@ piv_by_trait <- purrr::map_dfr(SITES, function(site) {
 piv_by_trait
 ```
 
+## Rank correlations of paternal families between years (Table S7)
+
+Spearman's rank correlation between Year-1 and Year-2 paternal-family
+means quantifies how consistently families are ordered across years for
+each trait. Families with a mean in both years are included; `n` is the
+number of paired observations.
+
+```{r rank-cor-years}
+rank_cor_years <- purrr::map_dfr(SITES, function(site) {
+  wide <- plasticity[[site]]$fam_means %>%
+    pivot_wider(names_from = Year, values_from = mean,
+                names_prefix = "Y")
+  purrr::map_dfr(TRAITS, function(tr) {
+    sub <- wide %>% filter(Trait == tr,
+                           !is.na(Y2022), !is.na(Y2023))
+    ct  <- suppressWarnings(
+      cor.test(sub$Y2022, sub$Y2023, method = "spearman"))
+    tibble(Site = site, Trait = tr,
+           n   = nrow(sub),
+           rho = unname(ct$estimate),
+           p   = ct$p.value)
+  })
+})
+rank_cor_years
+```
+
 # 4. Year effects on mean trait values (Eq. 3)
 
 For each trait × site we fit `trait ~ Year + (1|Donor) + (1|Recipient)`,
