@@ -648,16 +648,16 @@ primary <- run_W_analyses(W_aster, plasticity,
                           mean_PIv_by_family)
 ```
 
-## 9a. Pearson r: directional plasticity vs mean W
+## 9a. Table S11 / Eq. 5 — W_Y2 ~ W_Y1 + directional
 
 ```{r primary-9a}
-print(primary$dir_meanW_cor, n = Inf)
+print(primary$eq5, n = Inf)
 ```
 
-## 9b. Table S11 / Eq. 5 — W_Y2 ~ W_Y1 + directional
+## 9b. Table S12 — Pearson r: directional plasticity vs mean W
 
 ```{r primary-9b}
-print(primary$eq5, n = Inf)
+print(primary$dir_meanW_cor, n = Inf)
 ```
 
 ## 9c. Table S13 / Eq. 6 — deltaW ~ mean_W + directional
@@ -889,35 +889,41 @@ fig5
 
 ```{r fig6, fig.width=14, fig.height=5}
 fig6_df <- purrr::map_dfr(SITES, function(site) {
-  plasticity[[site]]$fam_means %>%
+  fm_wide <- plasticity[[site]]$fam_means %>%
     filter(Trait %in% c("SLA_SEG", "d13C_SEG")) %>%
-    pivot_wider(names_from = Trait, values_from = mean) %>%
-    mutate(Site = site)
+    pivot_wider(names_from = Trait, values_from = mean)
+
+  delta <- fm_wide %>%
+    dplyr::select(Donor, Year, SLA_SEG) %>%
+    pivot_wider(names_from = Year, values_from = SLA_SEG, names_prefix = "Y") %>%
+    mutate(delta_SLA = Y2023 - Y2022) %>%
+    dplyr::select(Donor, delta_SLA)
+
+  fm_wide %>% left_join(delta, by = "Donor") %>% mutate(Site = site)
 }) %>%
-  mutate(Site = factor(Site, levels = SITES),
-         Year = recode(as.character(Year),
-                       "2022" = "Year 1 (2022)",
-                       "2023" = "Year 2 (2023)"))
+  mutate(Site = factor(Site, levels = SITES)) %>%
+  group_by(Site, Donor) %>%
+  filter(!(Site == "BO" & any(SLA_SEG > 30))) %>%
+  ungroup()
 
-fig6_plot_df <- fig6_df %>%
-  filter(!(Site == "BO" & SLA_SEG > 30))
-
-fig6 <- ggplot(fig6_plot_df,
-               aes(SLA_SEG, d13C_SEG, group = Donor, colour = Year)) +
-  geom_path(arrow = arrow(length = unit(2, "mm"), type = "closed"),
-            alpha = 0.6) +
-  geom_point(size = 1.4) +
-  facet_wrap(~ Site, nrow = 1) +
-  scale_colour_manual(values = c("Year 1 (2022)" = "#0072B2",  # Okabe-Ito blue
-                                 "Year 2 (2023)" = "#D55E00"),  # Okabe-Ito vermillion
-                      name = NULL) +
-  labs(x = "SLA (mm²/mg)", y = "δ13C (‰)") +
+fig6 <- ggplot(fig6_df, aes(d13C_SEG, SLA_SEG, group = Donor)) +
+  geom_path(aes(colour = delta_SLA),
+            arrow = arrow(length = unit(2, "mm"), type = "closed"),
+            alpha = 0.7) +
+  geom_point(aes(shape = factor(Year)), colour = "black", size = 2) +
+  facet_wrap(~ Site, nrow = 1, scales = "free") +
+  scale_colour_gradient2(low = "#D55E00", mid = "grey88", high = "#0072B2",
+                         midpoint = 0, name = expression(Delta*SLA)) +
+  scale_shape_manual(values = c("2022" = 16, "2023" = 17),
+                     labels = c("2022" = "Year 1", "2023" = "Year 2"),
+                     name = "Year") +
+  labs(x = expression(bold(delta^13*C)), y = "SLA") +
   theme_plasticity +
-  theme(strip.text       = element_text(size = 14, face = "bold"),
-        axis.title       = element_text(face = "bold"),
-        legend.position  = "right",
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank())
+  theme(strip.text        = element_text(size = 13, face = "bold"),
+        strip.background  = element_rect(fill = "grey92", colour = NA),
+        axis.title        = element_text(size = 14, face = "bold"),
+        panel.grid.major  = element_blank(),
+        panel.grid.minor  = element_blank())
 fig6
 ```
 
