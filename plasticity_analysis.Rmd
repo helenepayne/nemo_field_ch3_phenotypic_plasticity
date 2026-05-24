@@ -14,8 +14,8 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
-                      fig.path = "Figures/", dev = c("png", "pdf"))
-dir.create(here::here("Tables"), showWarnings = FALSE)
+                      fig.path = "figures/", dev = c("png", "pdf"))
+dir.create(here::here("tables"), showWarnings = FALSE)
 ```
 
 This R Markdown reproduces the analyses reported in *Chapter 3:
@@ -68,7 +68,7 @@ TRAITS <- c("corolla_diam_mm_SEG", "SLA_SEG", "d13C_SEG", "msm_all")
 PIv_TRAITS <- setdiff(TRAITS, "d13C_SEG")
 TRAIT_LABELS <- c(
   corolla_diam_mm_SEG = "corolla diameter (mm)",
-  SLA_SEG             = "specific leaf area (mm²/mg)",
+  SLA_SEG             = "SLA (mm²/mg)",
   d13C_SEG            = "δ13C (‰)",
   msm_all             = "mean seed mass (mg)"
 )
@@ -334,7 +334,7 @@ observations contributing to each model fit.
 ```{r gxy-varcomp-table}
 TRAIT_LABELS_SHORT <- c(
   corolla_diam_mm_SEG = "Corolla diameter",
-  SLA_SEG             = "SLA",
+  SLA_SEG             = "SLA (mm²/mg)",
   d13C_SEG            = "δ¹³C",
   msm_all             = "Mean seed mass"
 )
@@ -821,6 +821,17 @@ print(agree_sig, n = Inf)
 
 # 12. Figures
 
+```{r fig-theme}
+theme_plasticity <- theme_bw(base_size = 14) +
+  theme(plot.title         = element_text(size = 16, face = "bold"),
+        axis.title         = element_text(size = 14),
+        axis.text          = element_text(size = 13),
+        strip.text         = element_text(size = 13, face = "bold"),
+        legend.title       = element_text(size = 13),
+        legend.text        = element_text(size = 12),
+        panel.grid.minor   = element_blank())
+```
+
 ## Figure 5: Trait reaction norms per population
 
 Each line is one paternal family; line colour distinguishes whether the
@@ -837,10 +848,13 @@ fig5_df <- purrr::map_dfr(SITES, function(site) {
   fm %>% left_join(dir, by = c("Donor", "Trait")) %>%
     mutate(Site = site)
 }) %>%
+  filter(!is.na(dir),
+         !(Site == "BO" & Trait == "SLA_SEG" & mean > 30)) %>%
   mutate(
     Site      = factor(Site, levels = SITES),
-    Trait_lab = factor(recode(Trait, !!!TRAIT_LABELS),
-                       levels = unname(TRAIT_LABELS[TRAITS]))
+    Trait_lab = factor(
+      stringr::str_wrap(recode(Trait, !!!TRAIT_LABELS), width = 16),
+      levels = stringr::str_wrap(unname(TRAIT_LABELS[TRAITS]), width = 16))
   )
 
 fig5 <- ggplot(fig5_df,
@@ -848,68 +862,98 @@ fig5 <- ggplot(fig5_df,
   geom_line(alpha = 0.5, linewidth = 0.35) +
   geom_point(size = 0.9) +
   facet_grid(Trait_lab ~ Site, scales = "free_y", switch = "y") +
-  scale_x_discrete(labels = c("2022" = "2022 (dry)",
-                              "2023" = "2023 (wet)"),
-                   expand = expansion(add = 0.15)) +
-  scale_colour_manual(values = c(increase = "#1f78b4",
-                                 decrease = "#e31a1c"),
-                      name = "Change 2022 → 2023") +
+  scale_x_discrete(labels = c("2022" = "Year 1",
+                              "2023" = "Year 2"),
+                   expand = expansion(add = 0.25)) +
+  scale_colour_manual(values = c(increase = "#0072B2",  # Okabe-Ito blue
+                                 decrease = "#D55E00"),  # Okabe-Ito vermillion
+                      name = "Year 1 (dry) → Year 2 (wet)",
+                      na.translate = FALSE) +
   labs(x = NULL, y = NULL) +
-  theme_bw(base_size = 11) +
+  theme_plasticity +
   theme(legend.position    = "bottom",
         legend.margin      = margin(0, 0, 0, 0),
         legend.box.spacing = unit(2, "pt"),
         strip.background.x = element_rect(fill = "grey92", colour = NA),
         strip.background.y = element_blank(),
         strip.placement    = "outside",
-        strip.text.y.left  = element_text(angle = 0, hjust = 1),
-        panel.spacing.x    = unit(2, "pt"),
-        panel.spacing.y    = unit(2, "pt"),
-        panel.grid.minor   = element_blank(),
+        strip.text.y.left  = element_text(size = 11, angle = 90, hjust = 0.5),
+        panel.spacing.x    = unit(16, "pt"),
+        panel.spacing.y    = unit(16, "pt"),
+        axis.text.x        = element_text(size = 12, lineheight = 0.85),
         plot.margin        = margin(2, 4, 2, 2))
 fig5
 ```
 
 ## Figure 6: Multivariate plasticity trajectories (SLA × δ13C)
 
-```{r fig6, fig.width=10, fig.height=8}
-multivar_trajectory <- function(site) {
-  fm <- plasticity[[site]]$fam_means %>%
+```{r fig6, fig.width=14, fig.height=5}
+fig6_df <- purrr::map_dfr(SITES, function(site) {
+  plasticity[[site]]$fam_means %>%
     filter(Trait %in% c("SLA_SEG", "d13C_SEG")) %>%
-    pivot_wider(names_from = Trait, values_from = mean)
+    pivot_wider(names_from = Trait, values_from = mean) %>%
+    mutate(Site = site)
+}) %>%
+  mutate(Site = factor(Site, levels = SITES),
+         Year = recode(as.character(Year),
+                       "2022" = "Year 1 (2022)",
+                       "2023" = "Year 2 (2023)"))
 
-  ggplot(fm, aes(SLA_SEG, d13C_SEG, group = Donor, colour = Year)) +
-    geom_path(arrow = arrow(length = unit(2, "mm"), type = "closed"),
-              alpha = 0.6) +
-    geom_point(size = 1.4) +
-    labs(title = site, x = "SLA (mm²/mg)", y = "δ13C (‰)") +
-    theme_bw()
-}
+fig6_plot_df <- fig6_df %>%
+  filter(!(Site == "BO" & SLA_SEG > 30))
 
-fig6 <- wrap_plots(purrr::map(SITES, multivar_trajectory), ncol = 2) +
-  plot_annotation(tag_levels = "A")
+fig6 <- ggplot(fig6_plot_df,
+               aes(SLA_SEG, d13C_SEG, group = Donor, colour = Year)) +
+  geom_path(arrow = arrow(length = unit(2, "mm"), type = "closed"),
+            alpha = 0.6) +
+  geom_point(size = 1.4) +
+  facet_wrap(~ Site, nrow = 1) +
+  scale_colour_manual(values = c("Year 1 (2022)" = "#0072B2",  # Okabe-Ito blue
+                                 "Year 2 (2023)" = "#D55E00"),  # Okabe-Ito vermillion
+                      name = NULL) +
+  labs(x = "SLA (mm²/mg)", y = "δ13C (‰)") +
+  theme_plasticity +
+  theme(strip.text       = element_text(size = 14, face = "bold"),
+        axis.title       = element_text(face = "bold"),
+        legend.position  = "right",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
 fig6
 ```
 
 ## Figure 7: Variance partitioning (G, M, G×Y, residual)
 
-```{r fig7, fig.width=10, fig.height=6}
-varcomp_labels <- c(`Donor:Year` = "Donor × Year (G × Y)",
-                    Donor        = "Donor (G)",
-                    Recipient    = "Recipient (M)",
+```{r fig7, fig.width=16, fig.height=5}
+varcomp_labels <- c(`Donor:Year` = "Paternal × Year (G × Y)",
+                    Donor        = "Paternal Family",
+                    Recipient    = "Maternal Family",
                     Residual     = "Residual")
 
 fig7 <- gxy_varcomp %>%
   mutate(Component = recode(grp, !!!varcomp_labels),
          Component = factor(Component, levels = unname(varcomp_labels)),
          Trait_lab = recode(Trait, !!!TRAIT_LABELS),
+         Trait_lab = factor(Trait_lab, levels = unname(TRAIT_LABELS[TRAITS])),
          Site      = factor(Site, levels = SITES)) %>%
   ggplot(aes(Site, percent, fill = Component)) +
   geom_col(position = "stack", width = 0.7) +
-  facet_wrap(~ Trait_lab, ncol = 2) +
-  scale_fill_brewer(palette = "Set2") +
+  facet_wrap(~ Trait_lab, nrow = 1) +
+  scale_fill_manual(values = c(
+    "Paternal × Year (G × Y)" = "#56B4E9",  # Okabe-Ito sky blue
+    "Paternal Family"          = "#D55E00",  # Okabe-Ito vermillion
+    "Maternal Family"          = "#E69F00",  # Okabe-Ito orange
+    "Residual"                 = "#CC79A7"   # Okabe-Ito reddish purple
+  )) +
   labs(y = "Variance explained (%)", x = NULL) +
-  theme_bw() + theme(legend.position = "bottom")
+  theme_plasticity +
+  theme(legend.position  = "right",
+        legend.title     = element_text(size = 15, face = "bold"),
+        legend.text      = element_text(size = 15),
+        legend.key.size  = unit(18, "pt"),
+        strip.text       = element_text(size = 15, face = "bold"),
+        axis.text        = element_text(size = 15),
+        axis.title       = element_text(size = 15, face = "bold"),
+        panel.spacing.x  = unit(8, "pt"))
 fig7
 ```
 
@@ -919,8 +963,8 @@ Top set of panels: primary analysis using aster sire effects.
 Bottom set of panels: sensitivity analysis using observed fecundity.
 Blue regression lines indicate p < 0.05 within that metric.
 
-```{r fig8, fig.width=11, fig.height=12}
-TRAIT_ROW_LEVELS <- c(unname(TRAIT_LABELS[TRAITS]), "Multivariate")
+```{r fig8, fig.width=12, fig.height=14}
+TRAIT_ROW_LEVELS <- c(unname(TRAIT_LABELS[TRAITS]), "multivariate")
 
 build_fig8_df <- function(W_df, sig_df) {
   d_trait <- purrr::map_dfr(SITES, function(site) {
@@ -935,7 +979,7 @@ build_fig8_df <- function(W_df, sig_df) {
   d_multi <- mean_directional_by_family %>%
     inner_join(W_df %>% dplyr::select(Site, Donor, mean_W),
                by = c("Site", "Donor")) %>%
-    mutate(Trait = "multivariate", Trait_lab = "Multivariate",
+    mutate(Trait = "multivariate", Trait_lab = "multivariate",
            x = mean_directional) %>%
     dplyr::select(Site, Donor, Trait, Trait_lab, x, mean_W)
 
@@ -948,35 +992,41 @@ build_fig8_df <- function(W_df, sig_df) {
            sig       = paste(Site, Trait) %in% sig_keys)
 }
 
-fig8_plot <- function(df, ylab_text, title_text) {
+fig8_plot <- function(df, ylab_text) {
+  label_df <- df %>%
+    distinct(Site, Trait_lab) %>%
+    mutate(x = -Inf, mean_W = Inf)
+
   ggplot(df, aes(x, mean_W)) +
-    geom_point(alpha = 0.7, size = 1.0) +
+    geom_text(data = label_df,
+              aes(x = x, y = mean_W, label = Trait_lab),
+              hjust = -0.05, vjust = 1.3,
+              size = 3.5, inherit.aes = FALSE) +
+    geom_point(alpha = 0.7, size = 1.2) +
     geom_smooth(data = filter(df, sig),
-                method = "lm", se = TRUE, colour = "steelblue") +
-    facet_grid(Trait_lab ~ Site, scales = "free", switch = "y") +
-    labs(title = title_text,
-         x = "Directional plasticity (Year 1 → Year 2)",
+                method = "lm", se = TRUE, colour = "#D55E00") +
+    facet_grid(Trait_lab ~ Site, scales = "free") +
+    labs(x = "Directional plasticity (Year 1 → Year 2)",
          y = ylab_text) +
-    theme_bw(base_size = 11) +
-    theme(strip.background.x = element_rect(fill = "grey92", colour = NA),
+    theme_plasticity +
+    theme(plot.title         = element_text(size = 16, face = "bold"),
+          strip.text.x       = element_text(size = 13, face = "bold"),
+          strip.text.y       = element_blank(),
+          strip.background.x = element_rect(fill = "grey92", colour = NA),
           strip.background.y = element_blank(),
-          strip.placement    = "outside",
-          strip.text.y.left  = element_text(angle = 0, hjust = 1),
-          panel.spacing.x    = unit(2, "pt"),
-          panel.spacing.y    = unit(2, "pt"),
-          panel.grid.minor   = element_blank(),
+          axis.title         = element_text(face = "bold"),
+          panel.spacing.x    = unit(3, "pt"),
+          panel.spacing.y    = unit(3, "pt"),
           plot.margin        = margin(2, 4, 2, 2))
 }
 
 fig8_primary <- fig8_plot(
   build_fig8_df(W_aster, primary$dir_meanW_cor),
-  expression(bar(W) ~ "(aster sire effect)"),
-  "Primary analysis — aster sire effects")
+  expression(bold(bar(W) ~ "(aster sire effect)")))
 
 fig8_sens <- fig8_plot(
   build_fig8_df(W_fec, sensitivity$dir_meanW_cor),
-  expression(bar(W) ~ "(observed fecundity)"),
-  "Sensitivity analysis — observed fecundity")
+  expression(bold(bar(W) ~ "(observed fecundity)")))
 
 fig8_primary
 fig8_sens
@@ -1114,10 +1164,10 @@ maintained in the manuscript / supplement directly:
 
 # 14. CSV table export
 
-All analysis tables are written to `Tables/` as CSVs.
+All analysis tables are written to `tables/` as CSVs.
 
 ```{r write-tables}
-wt <- function(df, fname) write_csv(df, here("Tables", fname))
+wt <- function(df, fname) write_csv(df, here("tables", fname))
 
 # §2 — PIv vs PImd robustness (Table S4)
 wt(piv_pimd_cor, "S4_piv_pimd_cor.csv")

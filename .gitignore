@@ -14,8 +14,8 @@
 data/
 
 # Generated figures and tables (written by Rmd knit)
-Figures/
-Tables/
+figures/
+tables/
 *.png
 *.jpg
 *.jpeg
