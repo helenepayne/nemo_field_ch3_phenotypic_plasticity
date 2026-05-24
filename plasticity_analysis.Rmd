@@ -826,35 +826,47 @@ print(agree_sig, n = Inf)
 Each line is one paternal family; line colour distinguishes whether the
 trait increased or decreased from Year 1 to Year 2.
 
-```{r fig5, fig.width=9, fig.height=10}
-reaction_norm_plot <- function(site) {
+```{r fig5, fig.width=10, fig.height=9}
+fig5_df <- purrr::map_dfr(SITES, function(site) {
   fm <- plasticity[[site]]$fam_means
   dir <- fm %>%
     pivot_wider(names_from = Year, values_from = mean,
                 names_prefix = "Y") %>%
     mutate(dir = if_else(Y2023 > Y2022, "increase", "decrease")) %>%
     dplyr::select(Donor, Trait, dir)
+  fm %>% left_join(dir, by = c("Donor", "Trait")) %>%
+    mutate(Site = site)
+}) %>%
+  mutate(
+    Site      = factor(Site, levels = SITES),
+    Trait_lab = factor(recode(Trait, !!!TRAIT_LABELS),
+                       levels = unname(TRAIT_LABELS[TRAITS]))
+  )
 
-  plot_df <- fm %>%
-    left_join(dir, by = c("Donor", "Trait")) %>%
-    mutate(Trait_lab = recode(Trait, !!!TRAIT_LABELS))
-
-  ggplot(plot_df,
-         aes(Year, mean, group = Donor, colour = dir)) +
-    geom_line(alpha = 0.5) + geom_point(size = 1) +
-    facet_wrap(~ Trait_lab, scales = "free_y", ncol = 2) +
-    scale_colour_manual(values = c(increase = "#1f78b4",
-                                   decrease = "#e31a1c"),
-                        name = NULL) +
-    labs(title = paste0(site, " — paternal-family reaction norms"),
-         x = NULL, y = "Family mean") +
-    theme_bw() +
-    theme(legend.position = "top",
-          strip.background = element_blank())
-}
-
-fig5 <- wrap_plots(purrr::map(SITES, reaction_norm_plot), ncol = 2) +
-  plot_annotation(tag_levels = "A")
+fig5 <- ggplot(fig5_df,
+               aes(Year, mean, group = Donor, colour = dir)) +
+  geom_line(alpha = 0.5, linewidth = 0.35) +
+  geom_point(size = 0.9) +
+  facet_grid(Trait_lab ~ Site, scales = "free_y", switch = "y") +
+  scale_x_discrete(labels = c("2022" = "2022 (dry)",
+                              "2023" = "2023 (wet)"),
+                   expand = expansion(add = 0.15)) +
+  scale_colour_manual(values = c(increase = "#1f78b4",
+                                 decrease = "#e31a1c"),
+                      name = "Change 2022 → 2023") +
+  labs(x = NULL, y = NULL) +
+  theme_bw(base_size = 11) +
+  theme(legend.position    = "bottom",
+        legend.margin      = margin(0, 0, 0, 0),
+        legend.box.spacing = unit(2, "pt"),
+        strip.background.x = element_rect(fill = "grey92", colour = NA),
+        strip.background.y = element_blank(),
+        strip.placement    = "outside",
+        strip.text.y.left  = element_text(angle = 0, hjust = 1),
+        panel.spacing.x    = unit(2, "pt"),
+        panel.spacing.y    = unit(2, "pt"),
+        panel.grid.minor   = element_blank(),
+        plot.margin        = margin(2, 4, 2, 2))
 fig5
 ```
 
@@ -907,17 +919,22 @@ Top set of panels: primary analysis using aster sire effects.
 Bottom set of panels: sensitivity analysis using observed fecundity.
 Blue regression lines indicate p < 0.05 within that metric.
 
-```{r fig8, fig.width=14, fig.height=18}
-make_fig8_panel <- function(site, W_df, sig_df, ylab_text) {
-  d_trait <- plasticity[[site]]$directional %>%
-    inner_join(filter(W_df, Site == site), by = "Donor") %>%
-    mutate(Trait_lab = recode(Trait, !!!TRAIT_LABELS),
-           x = directional)
+```{r fig8, fig.width=11, fig.height=12}
+TRAIT_ROW_LEVELS <- c(unname(TRAIT_LABELS[TRAITS]), "Multivariate")
 
-  d_multi <- filter(mean_directional_by_family, Site == site) %>%
-    inner_join(filter(W_df, Site == site) %>%
-                 dplyr::select(Donor, mean_W),
-               by = "Donor") %>%
+build_fig8_df <- function(W_df, sig_df) {
+  d_trait <- purrr::map_dfr(SITES, function(site) {
+    plasticity[[site]]$directional %>%
+      inner_join(filter(W_df, Site == site), by = "Donor") %>%
+      mutate(Site = site,
+             Trait_lab = recode(Trait, !!!TRAIT_LABELS),
+             x = directional) %>%
+      dplyr::select(Site, Donor, Trait, Trait_lab, x, mean_W)
+  })
+
+  d_multi <- mean_directional_by_family %>%
+    inner_join(W_df %>% dplyr::select(Site, Donor, mean_W),
+               by = c("Site", "Donor")) %>%
     mutate(Trait = "multivariate", Trait_lab = "Multivariate",
            x = mean_directional) %>%
     dplyr::select(Site, Donor, Trait, Trait_lab, x, mean_W)
@@ -925,40 +942,41 @@ make_fig8_panel <- function(site, W_df, sig_df, ylab_text) {
   sig_keys <- sig_df %>% filter(p < 0.05) %>%
     mutate(key = paste(Site, Trait)) %>% pull(key)
 
-  d <- bind_rows(
-    d_trait %>% dplyr::select(Site, Donor, Trait, Trait_lab, x, mean_W),
-    d_multi
-  ) %>%
-    mutate(Trait_lab = factor(Trait_lab,
-                               levels = c("Multivariate",
-                                          unname(TRAIT_LABELS))),
-           sig = paste(site, Trait) %in% sig_keys)
-
-  ggplot(d, aes(x, mean_W)) +
-    geom_point(alpha = 0.7, size = 1.2) +
-    geom_smooth(data = filter(d, sig),
-                method = "lm", se = TRUE, colour = "steelblue") +
-    facet_wrap(~ Trait_lab, scales = "free_x", ncol = 3) +
-    labs(title = site,
-         x = "Directional plasticity (Year 1 → Year 2)",
-         y = ylab_text) +
-    theme_bw() +
-    theme(strip.background = element_blank())
+  bind_rows(d_trait, d_multi) %>%
+    mutate(Site      = factor(Site, levels = SITES),
+           Trait_lab = factor(Trait_lab, levels = TRAIT_ROW_LEVELS),
+           sig       = paste(Site, Trait) %in% sig_keys)
 }
 
-fig8_primary <- wrap_plots(
-  purrr::map(SITES, ~ make_fig8_panel(.x, W_aster, primary$dir_meanW_cor,
-                                       expression(bar(W) ~ "(aster sire effect)"))),
-  ncol = 2) +
-  plot_annotation(title = "Primary analysis — aster sire effects",
-                  tag_levels = "A")
+fig8_plot <- function(df, ylab_text, title_text) {
+  ggplot(df, aes(x, mean_W)) +
+    geom_point(alpha = 0.7, size = 1.0) +
+    geom_smooth(data = filter(df, sig),
+                method = "lm", se = TRUE, colour = "steelblue") +
+    facet_grid(Trait_lab ~ Site, scales = "free", switch = "y") +
+    labs(title = title_text,
+         x = "Directional plasticity (Year 1 → Year 2)",
+         y = ylab_text) +
+    theme_bw(base_size = 11) +
+    theme(strip.background.x = element_rect(fill = "grey92", colour = NA),
+          strip.background.y = element_blank(),
+          strip.placement    = "outside",
+          strip.text.y.left  = element_text(angle = 0, hjust = 1),
+          panel.spacing.x    = unit(2, "pt"),
+          panel.spacing.y    = unit(2, "pt"),
+          panel.grid.minor   = element_blank(),
+          plot.margin        = margin(2, 4, 2, 2))
+}
 
-fig8_sens <- wrap_plots(
-  purrr::map(SITES, ~ make_fig8_panel(.x, W_fec, sensitivity$dir_meanW_cor,
-                                       expression(bar(W) ~ "(observed fecundity)"))),
-  ncol = 2) +
-  plot_annotation(title = "Sensitivity analysis — observed fecundity",
-                  tag_levels = "A")
+fig8_primary <- fig8_plot(
+  build_fig8_df(W_aster, primary$dir_meanW_cor),
+  expression(bar(W) ~ "(aster sire effect)"),
+  "Primary analysis — aster sire effects")
+
+fig8_sens <- fig8_plot(
+  build_fig8_df(W_fec, sensitivity$dir_meanW_cor),
+  expression(bar(W) ~ "(observed fecundity)"),
+  "Sensitivity analysis — observed fecundity")
 
 fig8_primary
 fig8_sens
