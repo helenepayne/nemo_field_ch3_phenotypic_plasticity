@@ -85,7 +85,7 @@ observed fecundity used in the sensitivity analysis.
 ```{r load-site}
 load_site <- function(site) {
   read_one <- function(year_int, gen_filter) {
-    path <- here("data/compiled_sheets",
+    path <- here("data",
                  paste0(site, "_compiledsheet_full_", year_int, ".csv"))
     d <- read_csv(path, show_col_types = FALSE)
     if (gen_filter) d <- d %>% filter(Gen == "G1")
@@ -407,7 +407,7 @@ analysis helper (defined in §8) runs on both.
 read_BV <- function(site, year) {
   fname <- if (year == "22") paste0(site, year, "_bhat.Donor.mu.csv") else
                              paste0(site, year, "_bhat.donor.mu.csv")
-  fpath <- here("data", "aster_outputs", fname)
+  fpath <- here("data", fname)
   d <- read.csv(fpath, stringsAsFactors = FALSE, check.names = FALSE)
   colnames(d)[1] <- "raw"
   colnames(d)[2] <- "BV_W"
@@ -1059,7 +1059,7 @@ would be needed to fold it in.
 | Figure S7 (BV densities)              | `chapter_1_adaptive_capacity/aster/`             | Probability densities of paternal-sibship BVs, per site × year   |
 
 The aster sire-effect BLUPs used as fitness (`W_aster` in §7a) are
-already loaded from `data/aster_outputs/` — those files are produced
+already loaded from `data/` — those files are produced
 by the Ch1 aster Rmds. If those Rmds are added to this repo, replace
 the loader with a `source()` call instead of reading the cached CSVs.
 
@@ -1076,11 +1076,11 @@ the loader with a `source()` call instead of reading the cached CSVs.
 ## 13b. Climate — Year-specific (Table 2, Figures S5–S6)
 
 The repo contains 10-minute air-temperature and relative-humidity records
-at all four sites for 2021-11 → 2023-06 in `data/climate/vpd-2022.csv`
+at all four sites for 2021-11 → 2023-06 in `data/vpd-2022.csv`
 and `vpd-2023.csv` (Dendra sensor data). These cover T (°C) and inputs
 needed for VPD, but **precipitation (mm) is not yet vendored**, so the
 PPT columns of Table 2 and Figure S6 cannot be regenerated until daily
-PPT records are added to `data/climate/`.
+PPT records are added to `data/`.
 
 Chunks below are stubs (`eval = FALSE`); flip to `eval = TRUE` locally
 once the required inputs are in place.
@@ -1098,7 +1098,7 @@ site_cols <- c(
 
 read_dendra <- function(year_label) {
   fname <- paste0("vpd-", year_label, ".csv")
-  read_csv(here("data", "climate", fname), show_col_types = FALSE) %>%
+  read_csv(here("data", fname), show_col_types = FALSE) %>%
     mutate(Time = as.POSIXct(Time, tz = "UTC"))
 }
 
@@ -1151,7 +1151,7 @@ plot_temp_year("2023")
 # at 1000 mm.
 #
 # TODO: requires a daily PPT (mm) series per site that is not yet in
-# data/climate/. Once added, sum within Dec–Jun window and plot the
+# data/. Once added, sum within Dec–Jun window and plot the
 # cumulative time series with facet_wrap(~ Site) as in figS5-stub.
 ```
 
