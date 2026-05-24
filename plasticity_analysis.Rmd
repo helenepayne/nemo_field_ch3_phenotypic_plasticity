@@ -504,7 +504,8 @@ run_W_analyses <- function(W_df, plasticity, mean_dir, mean_piv) {
       m <- lm(W_Y2 ~ W_Y1 + directional, data = d)
       tdy <- broom::tidy(m) %>% filter(term == "directional")
       tibble(Site = site, Trait = tr, n = nobs(m),
-             beta_plast = tdy$estimate, p_plast = tdy$p.value,
+             beta_plast = tdy$estimate, se_plast = tdy$std.error,
+             t_plast = tdy$statistic, p_plast = tdy$p.value,
              R2 = summary(m)$r.squared)
     })
   })
@@ -514,7 +515,8 @@ run_W_analyses <- function(W_df, plasticity, mean_dir, mean_piv) {
     m  <- lm(W_Y2 ~ W_Y1 + mean_directional, data = d)
     tdy <- broom::tidy(m) %>% filter(term == "mean_directional")
     tibble(Site = site, Trait = "multivariate", n = nobs(m),
-           beta_plast = tdy$estimate, p_plast = tdy$p.value,
+           beta_plast = tdy$estimate, se_plast = tdy$std.error,
+           t_plast = tdy$statistic, p_plast = tdy$p.value,
            R2 = summary(m)$r.squared)
   })
   eq5 <- bind_rows(eq5, eq5_multi) %>% arrange(Site, Trait)
@@ -528,8 +530,8 @@ run_W_analyses <- function(W_df, plasticity, mean_dir, mean_piv) {
       m <- lm(deltaW ~ mean_W + directional, data = d)
       tdy <- broom::tidy(m) %>% filter(term == "directional")
       tibble(Site = site, Trait = tr, n = nobs(m),
-             beta_plast = tdy$estimate, p_plast = tdy$p.value,
-             R2 = summary(m)$r.squared)
+             beta_plast = tdy$estimate, t_plast = tdy$statistic,
+             p_plast = tdy$p.value, R2 = summary(m)$r.squared)
     })
   })
   eq6_multi <- purrr::map_dfr(SITES, function(site) {
@@ -538,8 +540,8 @@ run_W_analyses <- function(W_df, plasticity, mean_dir, mean_piv) {
     m  <- lm(deltaW ~ mean_W + mean_directional, data = d)
     tdy <- broom::tidy(m) %>% filter(term == "mean_directional")
     tibble(Site = site, Trait = "multivariate", n = nobs(m),
-           beta_plast = tdy$estimate, p_plast = tdy$p.value,
-           R2 = summary(m)$r.squared)
+           beta_plast = tdy$estimate, t_plast = tdy$statistic,
+           p_plast = tdy$p.value, R2 = summary(m)$r.squared)
   })
   eq6 <- bind_rows(eq6, eq6_multi) %>% arrange(Site, Trait)
 
@@ -554,6 +556,7 @@ run_W_analyses <- function(W_df, plasticity, mean_dir, mean_piv) {
     tibble(n        = nobs(m_lin),
            p_quad   = q$p.value,
            beta_lin = l$estimate,
+           t_lin    = l$statistic,
            p_lin    = l$p.value,
            R2_lin   = summary(m_lin)$r.squared,
            R2_quad  = summary(m_quad)$r.squared)
@@ -590,6 +593,7 @@ run_W_analyses <- function(W_df, plasticity, mean_dir, mean_piv) {
     }
     ct <- cor.test(x[ok], y[ok])
     tibble(n = sum(ok), r = unname(ct$estimate),
+           t = unname(ct$statistic),
            conf_low = ct$conf.int[1], conf_high = ct$conf.int[2],
            p = ct$p.value)
   }
@@ -917,6 +921,8 @@ fig6 <- ggplot(fig6_df, aes(d13C_SEG, SLA_SEG, group = Donor)) +
   scale_shape_manual(values = c("2022" = 16, "2023" = 17),
                      labels = c("2022" = "Year 1", "2023" = "Year 2"),
                      name = "Year") +
+  scale_x_continuous(labels = scales::label_number(accuracy = 0.1)) +
+  scale_y_continuous(labels = scales::label_number(accuracy = 0.1)) +
   labs(x = expression(bold(delta^13*C)), y = "SLA") +
   theme_plasticity +
   theme(strip.text        = element_text(size = 13, face = "bold"),
