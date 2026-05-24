@@ -4,28 +4,35 @@ Chapter 3 analysis code for the magnitude, direction, and fitness consequences o
 
 ## Data dependencies
 
-This chapter has two kinds of inputs:
+All inputs live directly in `data/` and are read by
+[plasticity_analysis.Rmd](plasticity_analysis.Rmd) via `here("data", ...)`.
 
 ### 1. Compiled site×year datasheets (fetched from Dryad)
 
 `*_compiledsheet_full_2022.csv` and `*_compiledsheet_full_2023.csv` for the
 four sites (AC, BB, BO, HR) live in the Dryad data package
 [10.5061/dryad.pvmcvdp1p](https://doi.org/10.5061/dryad.pvmcvdp1p) and are
-fetched on first run by `R/fetch_dryad.R` into `data/`. The Rmds reference
-them via `here::here("data/compiled_sheets", ...)` (legacy path) — for
-new analyses, prefer reading from `data/` directly. While the Dryad package is
-still private, populate `data/` manually from your local copy.
+fetched on first run by [fetch_dryad.R](fetch_dryad.R) into `data/`. While the
+Dryad package is still private, populate `data/` manually from your local copy.
 
 ### 2. Aster-model breeding-value outputs from chapter 1 (vendored)
 
 The plasticity analyses use posterior breeding-value estimates produced by
 the aster models in
 [nemo_field_ch1_adaptive_capacity](https://github.com/helenepayne/nemo_field_ch1_adaptive_capacity).
-Those outputs are vendored in this repo under `data/aster_outputs/`:
+Those outputs are vendored alongside the compiled sheets in `data/`:
 
 ```
-data/aster_outputs/
-├── AC22_bhat.Donor.mu.csv     # 2022 BVs per donor, by site
+data/
+├── AC_compiledsheet_full_2022.csv   # compiled site×year datasheets (Dryad)
+├── AC_compiledsheet_full_2023.csv
+├── BB_compiledsheet_full_2022.csv
+├── BB_compiledsheet_full_2023.csv
+├── BO_compiledsheet_full_2022.csv
+├── BO_compiledsheet_full_2023.csv
+├── HR_compiledsheet_full_2022.csv
+├── HR_compiledsheet_full_2023.csv
+├── AC22_bhat.Donor.mu.csv           # per-donor breeding values from ch1 aster
 ├── AC23_bhat.donor.mu.csv
 ├── BB22_bhat.Donor.mu.csv
 ├── BB23_bhat.donor.mu.csv
@@ -33,18 +40,13 @@ data/aster_outputs/
 ├── BO23_bhat.donor.mu.csv
 ├── HR22_bhat.Donor.mu.csv
 ├── HR23_bhat.donor.mu.csv
-├── AC_22.csv .. HR_22.csv     # processed datasheets from ch1
-└── w_bothyears.csv
+├── vpd-2022.csv                     # site-level VPD covariates
+└── vpd-2023.csv
 ```
 
-These are a snapshot — if you regenerate them in `nemo_field_ch1_*`, copy the
-new versions over the vendored ones here and commit.
-
-> **Note on existing Rmd paths:** several Rmds in this repo currently
-> reference these aster outputs by absolute path
-> (`/Users/Helen/Desktop/nemo_field/aster/processed_data/…`). Update those
-> reads to `here::here("data", "aster_outputs", …)` to make the analyses
-> portable.
+The aster outputs are a snapshot — if you regenerate them in
+`nemo_field_ch1_*`, copy the new versions over the vendored ones here and
+commit.
 
 ## Provenance
 
