@@ -14,7 +14,7 @@ Rscript build.R
 2. Hard-stops with a clear error if any required file is missing after the fetch.
 3. Knits [plasticity_analysis.Rmd](plasticity_analysis.Rmd) to `plasticity_analysis.html`, writing figures to `figures/` and supplement tables (S4, S6–S17) to `tables/` as CSVs.
 
-While the Dryad dataset is still private, the fetch step will fail gracefully — populate `data/` manually from your local copy and `build.R` will pick up from there.
+While the Dryad dataset is still private (in review), `fetch_dryad()` cannot download automatically — Dryad gates its share-link downloads behind a browser-only JavaScript challenge. Reviewers can manually populate `data/` from the reviewer share link: <https://datadryad.org/share/LINK_NOT_FOR_PUBLICATION/0AI8JnLR7nXjbFd-suVX_OYr60J4H4TUzmBbLDiiGsk> — open it in a browser, click "Download all files", and move the CSVs into `data/`. Once the dataset is published, `build.R` will fetch them automatically.
 
 ## Data dependencies
 

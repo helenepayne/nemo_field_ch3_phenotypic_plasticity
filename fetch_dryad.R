@@ -23,6 +23,12 @@
 
 DRYAD_DOI <- "10.5061/dryad.pvmcvdp1p"
 
+# Reviewer "share" URL for the in-review Dryad dataset. Reviewers can use
+# this in a browser to download files manually while the dataset is private.
+# Programmatic download via this URL is NOT possible because Dryad gates
+# share-link downloads behind an AWS WAF JavaScript challenge.
+DRYAD_SHARE_URL <- "https://datadryad.org/share/LINK_NOT_FOR_PUBLICATION/0AI8JnLR7nXjbFd-suVX_OYr60J4H4TUzmBbLDiiGsk"
+
 # Exact set of files this repo's plasticity_analysis.Rmd reads from data/.
 # Update this list if the Rmd starts (or stops) reading new files.
 CHAPTER3_FILES <- (function() {
@@ -86,9 +92,18 @@ fetch_dryad <- function(files = CHAPTER3_FILES,
 
   manifest <- .dryad_manifest(doi)
   if (is.null(manifest)) {
-    warning("Could not enumerate Dryad files for DOI ", doi, ".\n",
-            "If the dataset is private/embargoed, populate ", data_dir,
-            " manually for now.")
+    message("Could not enumerate Dryad files for DOI ", doi, ".\n",
+            "The dataset is still private/in-review. To populate ",
+            data_dir, ":\n",
+            "  1. Open the reviewer share link in a browser:\n",
+            "       ", DRYAD_SHARE_URL, "\n",
+            "  2. Click 'Download all files' (or download each CSV).\n",
+            "  3. Move the downloaded CSVs into ", data_dir, ".\n",
+            "Programmatic download via the share link is not possible — ",
+            "Dryad routes share-link downloads through an AWS WAF JS ",
+            "challenge that requires a real browser. Once the dataset is ",
+            "published, this script will fetch files automatically via ",
+            "the public Dryad API.")
     return(invisible(NULL))
   }
 
