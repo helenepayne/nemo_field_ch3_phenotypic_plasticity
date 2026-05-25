@@ -1,26 +1,24 @@
 # nemo_field_ch3_phenotypic_plasticity
 
-Chapter 3 analysis code for the magnitude, direction, and fitness consequences of plasticity in four functional traits (specific leaf area, δ¹³C, mean seed mass, and corolla diameter) in two environmentally distinct years in four pedigreed populations (Angelo Coast, Bodega Bay, Blue Oak, and Hastings Reserve) of the California annual wildflower *Nemophila menziesii*
+Chapter 3 analysis code for the magnitude, direction, and fitness consequences of plasticity in four functional traits (specific leaf area, δ¹³C, mean seed mass, and corolla diameter) in two environmentally distinct years in four pedigreed populations (Angelo Coast, Bodega Bay, Blue Oak, and Hastings Reserve) of the California annual wildflower *Nemophila menziesii*.
+
+## Quick start
+
+```sh
+Rscript build.R
+```
+
+`build.R` does the whole pipeline:
+
+1. Sources [fetch_dryad.R](fetch_dryad.R) and downloads the 16 input files this repo needs from Dryad into `data/` (skipping anything already cached).
+2. Hard-stops with a clear error if any required file is missing after the fetch.
+3. Knits [plasticity_analysis.Rmd](plasticity_analysis.Rmd) to `plasticity_analysis.html`, writing figures to `figures/` and supplement tables (S4, S6–S17) to `tables/` as CSVs.
+
+While the Dryad dataset is still private, the fetch step will fail gracefully — populate `data/` manually from your local copy and `build.R` will pick up from there.
 
 ## Data dependencies
 
-All inputs live directly in `data/` and are read by
-[plasticity_analysis.Rmd](plasticity_analysis.Rmd) via `here("data", ...)`.
-
-### 1. Compiled site×year datasheets (fetched from Dryad)
-
-`*_compiledsheet_full_2022.csv` and `*_compiledsheet_full_2023.csv` for the
-four sites (AC, BB, BO, HR) live in the Dryad data package
-[10.5061/dryad.pvmcvdp1p](https://doi.org/10.5061/dryad.pvmcvdp1p) and are
-fetched on first run by [fetch_dryad.R](fetch_dryad.R) into `data/`. While the
-Dryad package is still private, populate `data/` manually from your local copy.
-
-### 2. Aster-model breeding-value outputs from chapter 1 (vendored)
-
-The plasticity analyses use posterior breeding-value estimates produced by
-the aster models in
-[nemo_field_ch1_adaptive_capacity](https://github.com/helenepayne/nemo_field_ch1_adaptive_capacity).
-Those outputs are vendored alongside the compiled sheets in `data/`:
+All inputs live directly in `data/` (flat, no subdirectories) and are read by [plasticity_analysis.Rmd](plasticity_analysis.Rmd) via `here("data", ...)`. The full set is enumerated as `CHAPTER3_FILES` in [fetch_dryad.R](fetch_dryad.R):
 
 ```
 data/
@@ -32,27 +30,31 @@ data/
 ├── BO_compiledsheet_full_2023.csv
 ├── HR_compiledsheet_full_2022.csv
 ├── HR_compiledsheet_full_2023.csv
-├── AC22_bhat.Donor.mu.csv           # per-donor breeding values from ch1 aster
-├── AC23_bhat.donor.mu.csv
+├── AC22_bhat.Donor.mu.csv           # per-donor aster breeding values from ch1
+├── AC23_bhat.Donor.mu.csv
 ├── BB22_bhat.Donor.mu.csv
-├── BB23_bhat.donor.mu.csv
+├── BB23_bhat.Donor.mu.csv
 ├── BO22_bhat.Donor.mu.csv
-├── BO23_bhat.donor.mu.csv
+├── BO23_bhat.Donor.mu.csv
 ├── HR22_bhat.Donor.mu.csv
-├── HR23_bhat.donor.mu.csv
-├── vpd-2022.csv                     # site-level VPD covariates
-└── vpd-2023.csv
+└── HR23_bhat.Donor.mu.csv
 ```
 
-The aster outputs are a snapshot — if you regenerate them in
-`nemo_field_ch1_*`, copy the new versions over the vendored ones here and
-commit.
+All 16 files are part of the Dryad package [10.5061/dryad.pvmcvdp1p](https://doi.org/10.5061/dryad.pvmcvdp1p). The aster outputs are a snapshot from the chapter-1 pipeline — if you regenerate them in [nemo_field_ch1_adaptive_capacity](https://github.com/helenepayne/nemo_field_ch1_adaptive_capacity), drop the new versions into `data/` and re-run `build.R`.
+
+The Dryad package also includes climate covariates (`vpd-*.csv`, rainfall/temperature, PRISM rasters) and a combined fitness file (`w_bothyears.csv`). These are **not** read by [plasticity_analysis.Rmd](plasticity_analysis.Rmd) and so are not fetched by default. To pull them anyway, pass an explicit `files` argument to `fetch_dryad()`.
+
+## Outputs
+
+- `plasticity_analysis.html` — full knitted report
+- `figures/` — PNG + PDF for each numbered figure (Fig. 5–8)
+- `tables/` — CSVs for supplement tables S4, S6–S17 and primary/sensitivity comparisons
+
+Both `figures/` and `tables/` are gitignored; they're rebuilt fresh on every knit.
 
 ## Provenance
 
-This repo was split from
-[helenepayne/nemo_field](https://github.com/helenepayne/nemo_field) (now
-archived). Per-file commit history pre-split lives in that monorepo.
+This repo was split from [helenepayne/nemo_field](https://github.com/helenepayne/nemo_field) (now archived). Per-file commit history pre-split lives in that monorepo.
 
 ## Sister repositories
 

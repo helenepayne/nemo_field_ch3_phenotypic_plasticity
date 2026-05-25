@@ -5,20 +5,69 @@
 #
 # Usage:
 #   source(here::here("fetch_dryad.R"))
-#   fetch_dryad(c("AC_compiledsheet_full_2022.csv",
-#                 "AC_compiledsheet_full_2023.csv"))
+#   fetch_dryad()                       # fetches CHAPTER3_FILES (default)
+#   fetch_dryad(c("AC_compiledsheet_full_2022.csv"))  # subset
+#
+# `CHAPTER3_FILES` lists exactly the files plasticity_analysis.Rmd reads
+# from data/. The Dryad package may contain additional files (climate,
+# rasters, etc.) — those are NOT downloaded by default.
 #
 # Behaviour:
 #   - First run: hits the Dryad API, downloads files into data/.
 #   - Subsequent runs: skips files already present in data/.
-#   - If the Dryad package is private/embargoed (HTTP 403/404), the function
-#     warns and exits gracefully so that users with a local copy of the data
+#   - If the Dryad package is private/embargoed (HTTP 403/404, or the
+#     dataset returns "Identifier cannot be viewed"), the function warns
+#     and exits gracefully so that users with a local copy of the data
 #     in data/ can still run analyses without internet access.
 # ---------------------------------------------------------------------------
 
 DRYAD_DOI <- "10.5061/dryad.pvmcvdp1p"
 
-fetch_dryad <- function(files,
+# Exact set of files this repo's plasticity_analysis.Rmd reads from data/.
+# Update this list if the Rmd starts (or stops) reading new files.
+CHAPTER3_FILES <- (function() {
+  sites <- c("AC", "BB", "BO", "HR")
+  c(outer(sites, c(2022, 2023),
+          function(s, y) paste0(s, "_compiledsheet_full_", y, ".csv")),
+    paste0(sites, "22_bhat.Donor.mu.csv"),
+    paste0(sites, "23_bhat.Donor.mu.csv"))
+})()
+
+# Resolve a Dryad DOI to a data.frame of files for the latest published
+# version. Returns NULL on any error (including private/embargoed datasets).
+.dryad_manifest <- function(doi) {
+  ds <- tryCatch(rdryad::dryad_dataset(dois = doi),
+                 error = function(e) NULL)
+  if (is.null(ds) || length(ds) == 0) return(NULL)
+  entry <- ds[[1]]
+  if (!is.null(entry$message)) {
+    warning("Dryad API says: ", entry$message,
+            "\nThe dataset DOI ", doi, " is likely private or in review; ",
+            "the public API cannot enumerate its files yet.")
+    return(NULL)
+  }
+  ds_id <- entry$id
+  if (is.null(ds_id)) return(NULL)
+
+  versions <- tryCatch(rdryad::dryad_versions(ids = ds_id),
+                       error = function(e) NULL)
+  if (is.null(versions) || length(versions) == 0) return(NULL)
+  vdf <- versions[[1]]
+  # Pick the most recent version id
+  version_id <- if (is.data.frame(vdf) && "id" %in% names(vdf)) {
+    tail(vdf$id, 1)
+  } else NULL
+  if (is.null(version_id)) return(NULL)
+
+  files <- tryCatch(rdryad::dryad_versions_files(ids = version_id),
+                    error = function(e) NULL)
+  if (is.null(files) || length(files) == 0) return(NULL)
+  fdf <- files[[1]]
+  if (!is.data.frame(fdf)) return(NULL)
+  fdf
+}
+
+fetch_dryad <- function(files = CHAPTER3_FILES,
                         doi      = DRYAD_DOI,
                         data_dir = here::here("data"),
                         overwrite = FALSE) {
@@ -35,19 +84,27 @@ fetch_dryad <- function(files,
     return(invisible(file.path(data_dir, files)))
   }
 
-  manifest <- tryCatch(
-    rdryad::dryad_files(doi = doi),
-    error = function(e) {
-      warning("Could not query Dryad for DOI ", doi, ": ", conditionMessage(e),
-              "\nIf the dataset is private/embargoed, populate ", data_dir,
-              " manually for now.")
-      return(NULL)
-    }
-  )
-  if (is.null(manifest)) return(invisible(NULL))
+  manifest <- .dryad_manifest(doi)
+  if (is.null(manifest)) {
+    warning("Could not enumerate Dryad files for DOI ", doi, ".\n",
+            "If the dataset is private/embargoed, populate ", data_dir,
+            " manually for now.")
+    return(invisible(NULL))
+  }
+
+  # rdryad typically returns columns like 'path' (filename) and 'download'
+  # (download URL). Be defensive about column names.
+  name_col <- intersect(c("path", "name", "title"), names(manifest))[1]
+  url_col  <- intersect(c("download", "download_url", "href"),
+                       names(manifest))[1]
+  if (is.na(name_col) || is.na(url_col)) {
+    warning("Unexpected Dryad manifest schema (columns: ",
+            paste(names(manifest), collapse = ", "), ")")
+    return(invisible(NULL))
+  }
 
   for (f in missing) {
-    url <- manifest$download_url[manifest$name == f]
+    url <- manifest[[url_col]][manifest[[name_col]] == f]
     if (length(url) == 0) {
       warning("File '", f, "' not found in Dryad package ", doi)
       next

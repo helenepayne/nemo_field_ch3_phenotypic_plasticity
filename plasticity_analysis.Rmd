@@ -405,8 +405,7 @@ analysis helper (defined in §8) runs on both.
 
 ```{r load-BV}
 read_BV <- function(site, year) {
-  fname <- if (year == "22") paste0(site, year, "_bhat.Donor.mu.csv") else
-                             paste0(site, year, "_bhat.donor.mu.csv")
+  fname <- paste0(site, year, "_bhat.Donor.mu.csv")
   fpath <- here("data", fname)
   d <- read.csv(fpath, stringsAsFactors = FALSE, check.names = FALSE)
   colnames(d)[1] <- "raw"
