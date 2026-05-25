@@ -86,9 +86,13 @@ fetch_dryad <- function(files = CHAPTER3_FILES,
              else files[!file.exists(file.path(data_dir, files))]
 
   if (length(missing) == 0) {
-    message("All requested files already present in ", data_dir)
+    message("Skipping Dryad — all ", length(files),
+            " required files already present in ", data_dir)
     return(invisible(file.path(data_dir, files)))
   }
+  message("Fetching ", length(missing), " of ", length(files),
+          " files from Dryad (", length(files) - length(missing),
+          " already cached)")
 
   manifest <- .dryad_manifest(doi)
   if (is.null(manifest)) {

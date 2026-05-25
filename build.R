@@ -20,12 +20,20 @@ stopifnot(
   "plasticity_analysis.Rmd not found"            = file.exists("plasticity_analysis.Rmd")
 )
 
-# ---- 1. fetch data ----------------------------------------------------------
-message("==> Fetching data from Dryad (cached files are skipped)...")
+# ---- 1. data: use cache, fetch from Dryad only if anything's missing -------
 source("fetch_dryad.R")
-fetch_dryad()  # defaults to CHAPTER3_FILES — exactly what the Rmd reads
+missing_before <- CHAPTER3_FILES[
+  !file.exists(file.path("data", CHAPTER3_FILES))
+]
+if (length(missing_before) == 0) {
+  message("==> Data cache complete — skipping Dryad fetch")
+} else {
+  message("==> ", length(missing_before), " data file(s) missing — ",
+          "attempting Dryad fetch")
+  fetch_dryad()  # defaults to CHAPTER3_FILES — exactly what the Rmd reads
+}
 
-# ---- 2. sanity-check that required files are present ------------------------
+# Sanity-check: stop early if any required file is still absent after fetch
 missing <- CHAPTER3_FILES[
   !file.exists(file.path("data", CHAPTER3_FILES))
 ]
