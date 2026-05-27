@@ -1028,6 +1028,7 @@ fig5 <- ggplot(fig5_df,
   scale_x_discrete(labels = c("2022" = "Year 1",
                               "2023" = "Year 2"),
                    expand = expansion(add = 0.25)) +
+  scale_y_continuous(labels = scales::label_number(accuracy = 0.1)) +
   scale_colour_manual(values = c(increase = "#0072B2",  # Okabe-Ito blue
                                  decrease = "#D55E00"),  # Okabe-Ito vermillion
                       name = "Year 1 (dry) → Year 2 (wet)",
@@ -1115,6 +1116,7 @@ fig7 <- gxy_varcomp %>%
     "Maternal Family"          = "#E69F00",  # Okabe-Ito orange
     "Residual"                 = "#CC79A7"   # Okabe-Ito reddish purple
   )) +
+  scale_y_continuous(labels = scales::label_number(accuracy = 1)) +
   labs(y = "Variance explained (%)", x = NULL) +
   theme_plasticity +
   theme(legend.position  = "right",
@@ -1177,6 +1179,8 @@ fig8_plot <- function(df, ylab_text) {
     geom_smooth(data = filter(df, sig),
                 method = "lm", se = TRUE, colour = "#D55E00") +
     facet_grid(Trait_lab ~ Site, scales = "free") +
+    scale_x_continuous(labels = scales::label_number(accuracy = 0.1)) +
+    scale_y_continuous(labels = scales::label_number(accuracy = 0.1)) +
     labs(x = "Directional plasticity (Year 1 → Year 2)",
          y = ylab_text) +
     theme_plasticity +
