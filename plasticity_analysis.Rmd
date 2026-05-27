@@ -206,21 +206,55 @@ piv_pimd_cor
 # 3. Comparing trait-specific plasticity (Table S6)
 
 Trait-level mean PIv (across paternal families) summarises how plastic
-each trait is on average in each population. The one-sample t-test
-evaluates whether PIv differs from zero.
+each trait is on average in each population. Because PIv ≡ (max −
+min) / |max| is bounded ≥ 0 by construction, a one-sample t-test
+against zero is uninformative (the null is mathematically impossible —
+any non-degenerate sample produces PIv > 0 from sampling noise alone).
+We instead use a within-family permutation test: under H₀ (the two
+years are exchangeable within a paternal family), we shuffle Year
+labels across the plants of each Donor, recompute family means and PIv
+per Donor, and take the mean PIv across families. The reported
+`p_perm` is the upper-tail proportion of `B = 999` permuted mean PIv
+values that are ≥ the observed mean.
 
-```{r piv-by-trait}
+```{r piv-perm-test}
+# Permutation test for trait-level mean PIv under H0 of no within-family
+# year effect. PIv is invariant to which year is labelled "Y1" vs "Y2",
+# so the right null is plant-level Year shuffling within each Donor.
+piv_perm_test <- function(d, trait, B = 999, seed = 42) {
+  set.seed(seed)
+  d <- d[!is.na(d[[trait]]), c("Donor", "Year", trait)]
+  per_donor <- split(d, d$Donor, drop = TRUE)
+  one_piv <- function(vals, is_y1) {
+    if (!any(is_y1) || all(is_y1)) return(0)
+    m1 <- mean(vals[is_y1]); m2 <- mean(vals[!is_y1])
+    mx <- max(m1, m2); mn <- min(m1, m2)
+    if (mx == 0) 0 else (mx - mn) / abs(mx)
+  }
+  obs_mean <- mean(vapply(per_donor, function(p)
+    one_piv(p[[trait]], p$Year == "2022"), numeric(1)), na.rm = TRUE)
+  perm_means <- replicate(B, mean(vapply(per_donor, function(p)
+    one_piv(p[[trait]], sample(p$Year) == "2022"),
+    numeric(1)), na.rm = TRUE))
+  tibble(obs_mean_PIv = obs_mean,
+         p_perm       = (sum(perm_means >= obs_mean) + 1) / (B + 1),
+         B            = B)
+}
+
 piv_by_trait <- purrr::map_dfr(SITES, function(site) {
-  plasticity[[site]]$PIv %>%
+  descriptive <- plasticity[[site]]$PIv %>%
     filter(Trait %in% PIv_TRAITS) %>%
     group_by(Trait) %>%
     summarise(n        = n(),
               mean_PIv = mean(PIv, na.rm = TRUE),
               sd_PIv   = sd(PIv,   na.rm = TRUE),
               se_PIv   = sd_PIv / sqrt(n),
-              t        = t.test(PIv, mu = 0)$statistic,
-              p        = t.test(PIv, mu = 0)$p.value,
-              .groups  = "drop") %>%
+              .groups  = "drop")
+  perm <- purrr::map_dfr(PIv_TRAITS, function(tr)
+    piv_perm_test(site_data[[site]], tr) %>%
+      mutate(Trait = tr, .before = 1))
+  descriptive %>%
+    inner_join(perm, by = "Trait") %>%
     mutate(Site = site, .before = 1)
 })
 piv_by_trait
