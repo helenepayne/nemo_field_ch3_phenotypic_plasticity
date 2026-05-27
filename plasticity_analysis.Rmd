@@ -555,6 +555,13 @@ run_W_analyses <- function(W_df, plasticity, mean_dir, mean_piv) {
   eq5 <- bind_rows(eq5, eq5_multi) %>% arrange(Site, Trait)
 
   # 8c. Eq. 6: deltaW ~ mean_W + directional
+  # NB: deltaW = W_Y2 - W_Y1 and mean_W = (W_Y1 + W_Y2)/2 are
+  # mathematically coupled (Cov(deltaW, mean_W) = (Var(W_Y2) - Var(W_Y1))/2;
+  # Bland & Altman 1995, Oldham 1962). Model R^2 therefore reflects that
+  # algebraic coupling, not biological signal, and is intentionally not
+  # reported. mean_W enters as a baseline-fitness covariate; only the
+  # slope and inference for the plasticity term (directional) are
+  # interpretable estimands here.
   eq6 <- purrr::map_dfr(SITES, function(site) {
     bw <- filter(W_df, Site == site)
     pl <- plasticity[[site]]$directional
@@ -564,7 +571,7 @@ run_W_analyses <- function(W_df, plasticity, mean_dir, mean_piv) {
       tdy <- broom::tidy(m) %>% filter(term == "directional")
       tibble(Site = site, Trait = tr, n = nobs(m),
              beta_plast = tdy$estimate, t_plast = tdy$statistic,
-             p_plast = tdy$p.value, R2 = summary(m)$r.squared)
+             p_plast = tdy$p.value)
     })
   })
   eq6_multi <- purrr::map_dfr(SITES, function(site) {
@@ -574,7 +581,7 @@ run_W_analyses <- function(W_df, plasticity, mean_dir, mean_piv) {
     tdy <- broom::tidy(m) %>% filter(term == "mean_directional")
     tibble(Site = site, Trait = "multivariate", n = nobs(m),
            beta_plast = tdy$estimate, t_plast = tdy$statistic,
-           p_plast = tdy$p.value, R2 = summary(m)$r.squared)
+           p_plast = tdy$p.value)
   })
   eq6 <- bind_rows(eq6, eq6_multi) %>% arrange(Site, Trait)
 
