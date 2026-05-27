@@ -187,6 +187,11 @@ mean_directional_by_family <- purrr::map_dfr(SITES, function(site) {
 
 ## PIv vs PImd robustness check (Table S4)
 
+**Table S4.** Pearson r between mean-based plasticity (PIv, Eq. 1) and
+median-based plasticity (PImd) per Site × Trait. Robustness check;
+values near 1 indicate plasticity inference does not depend on the
+central-tendency choice.
+
 ```{r piv-pimd-cor}
 piv_pimd_cor <- purrr::map_dfr(SITES, function(site) {
   x <- plasticity[[site]]
@@ -216,6 +221,14 @@ labels across the plants of each Donor, recompute family means and PIv
 per Donor, and take the mean PIv across families. The reported
 `p_perm` is the upper-tail proportion of `B = 999` permuted mean PIv
 values that are ≥ the observed mean.
+
+**Table S6.** Trait-level mean PIv per population. `mean_PIv` ± `sd_PIv`
+are descriptive across paternal families; `p_perm` is the upper-tail
+p-value from a within-family permutation test (B = 999, Year labels
+shuffled within each Donor) under H₀ that years are exchangeable
+within a family. PIv ≥ 0 by construction, so a one-sample t-test
+against zero is uninformative and is not used. No multiple-testing
+correction applied across the 12 cells.
 
 ```{r piv-perm-test}
 # Permutation test for trait-level mean PIv under H0 of no within-family
@@ -262,6 +275,11 @@ piv_by_trait
 
 ## Rank correlations of paternal families between years (Table S7)
 
+**Table S7.** Spearman rank correlations of paternal-family trait means
+between Year 1 (2022) and Year 2 (2023), per Site × Trait. High ρ
+indicates conserved family ordering across years (low rank-level
+G×Y). Only families with non-missing means in both years contribute.
+
 Spearman's rank correlation between Year-1 and Year-2 paternal-family
 means quantifies how consistently families are ordered across years for
 each trait. Families with a mean in both years are included; `n` is the
@@ -287,6 +305,13 @@ rank_cor_years
 ```
 
 # 4. Year effects on mean trait values (Table S8, Eq. 3)
+
+**Table S8.** Year fixed effect from Eq. 3,
+`lmer(trait ~ Year + (1|Donor) + (1|Recipient))` (ML for fixed-effect
+inference). `estimate` is the Year-2 minus Year-1 mean shift in trait
+units; `R2m` / `R2c` are marginal / conditional R² (Nakagawa &
+Schielzeth). NA values for `R2c` reflect singular random-effect fits
+(σ² estimated at zero), not missing data.
 
 For each trait × site we fit `trait ~ Year + (1|Donor) + (1|Recipient)`,
 report Year fixed-effect estimates and marginal/conditional R².
@@ -321,6 +346,13 @@ significance of the `Donor:Year` variance component is assessed with a
 REML likelihood ratio test; the p-value is halved to correct for testing
 on the boundary (H₀: σ² = 0; Self & Liang 1987).  Both models are fit
 with REML; variance components are drawn from the REML full model.
+
+**G×Y LRT table (below).** REML likelihood-ratio test of the
+`(1|Donor:Year)` variance component (full vs null of Eq. 3) per
+Site × Trait. `p_boundary` is the standard ½-corrected p-value for
+testing on the parameter-space boundary σ² ≥ 0 (Self & Liang 1987).
+`p_boundary` = 0.5 corresponds to χ² = 0 — i.e. no support for
+nonzero G×Y, not a software artefact.
 
 ```{r gxy-lmm}
 fit_gxy <- function(d, trait) {
@@ -406,7 +438,13 @@ gxy_varcomp_table <- gxy_varcomp %>%
 
 knitr::kable(gxy_varcomp_table, format = "html",
              align = c("l", "l", "r", "r", "r", "r"),
-             caption = "Table 4. Variance components from the G×Y model (Eq. 4).") %>%
+             caption = paste0(
+               "Table 4 / S9. Variance components (σ², ±SD, % of total) ",
+               "from the full G×Y model (Eq. 4: trait ~ Year + (1|Donor) + ",
+               "(1|Recipient) + (1|Donor:Year)), fit by REML. The Donor:Year ",
+               "component is the genetic variance in plasticity. Cells with ",
+               "σ² estimated at zero indicate no detectable variation ",
+               "in that component for that trait × population.")) %>%
   kableExtra::kable_styling(
     bootstrap_options = c("striped", "bordered", "condensed"),
     full_width = FALSE, position = "left"
@@ -694,11 +732,21 @@ primary <- run_W_analyses(W_aster, plasticity,
 
 ## 9a. Table S11 / Eq. 5 — W_Y2 ~ W_Y1 + directional
 
+**Table S11.** Eq. 5: `lm(W_Y2 ~ W_Y1 + directional)`. Reports the
+plasticity slope and inference; `W_Y1` controls for baseline fitness.
+The multivariate row uses `mean_directional` across the four traits.
+Fitness is the aster sire-effect BLUP. No multiple-testing correction
+applied (20 tests).
+
 ```{r primary-9a}
 print(primary$eq5, n = Inf)
 ```
 
 ## 9b. Table S12 — Pearson r: directional plasticity vs mean W
+
+**Table S12.** Pearson r between directional plasticity (Eq. 2) and
+mean paternal-family fitness, per Site × Trait. Fitness is the aster
+sire-effect BLUP. No multiple-testing correction applied.
 
 ```{r primary-9b}
 print(primary$dir_meanW_cor, n = Inf)
@@ -706,11 +754,26 @@ print(primary$dir_meanW_cor, n = Inf)
 
 ## 9c. Table S13 / Eq. 6 — deltaW ~ mean_W + directional
 
+**Table S13.** Eq. 6: `lm(deltaW ~ mean_W + directional)`. Reports
+the plasticity slope only. ΔW = W_Y2 − W_Y1 and mean_W = (W_Y1 +
+W_Y2)/2 are mathematically coupled (Bland & Altman 1995, Oldham 1962),
+so model R² is not interpretable and is intentionally not reported;
+mean_W enters as a baseline-fitness covariate, not an estimand.
+Fitness is the aster sire-effect BLUP. No multiple-testing correction
+applied.
+
 ```{r primary-9c}
 print(primary$eq6, n = Inf)
 ```
 
 ## 9d. Table S14 / Eq. 7/8 — deltaW ~ PIv
+
+**Table S14.** Eq. 7/8: `lm(deltaW ~ PIv)` (linear; `p_lin`, `R2_lin`)
+and `lm(deltaW ~ PIv + I(PIv^2))` (quadratic improvement; `p_quad`,
+`R2_quad`). The quadratic form tests the intermediate-optimum /
+cost-of-plasticity prediction. δ¹³C is excluded (PIv is undefined on
+sign-dependent scales). Fitness is the aster sire-effect BLUP. No
+multiple-testing correction applied.
 
 ```{r primary-9d}
 print(primary$eq78, n = Inf)
@@ -718,11 +781,19 @@ print(primary$eq78, n = Inf)
 
 ## 9e. Table S10 — Pearson r: PIv vs W_Y2
 
+**Table S10.** Pearson r between PIv (Eq. 1) and Year-2 fitness
+`W_Y2`, per Site × Trait. δ¹³C excluded. No multiple-testing
+correction applied.
+
 ```{r primary-9e}
 print(primary$s10, n = Inf)
 ```
 
 ## 9f. Table S15 — Pearson r: directional vs W_Y2
+
+**Table S15.** Pearson r between directional plasticity (Eq. 2) and
+Year-2 fitness `W_Y2`, per Site × Trait. No multiple-testing
+correction applied.
 
 ```{r primary-9f}
 print(primary$s15, n = Inf)
@@ -730,11 +801,17 @@ print(primary$s15, n = Inf)
 
 ## 9g. Table S16 — Pearson r: PIv vs deltaW
 
+**Table S16.** Pearson r between PIv and ΔW = W_Y2 − W_Y1, per Site ×
+Trait. δ¹³C excluded. No multiple-testing correction applied.
+
 ```{r primary-9g}
 print(primary$s16, n = Inf)
 ```
 
 ## 9h. Table S17 — Pearson r: directional vs deltaW
+
+**Table S17.** Pearson r between directional plasticity and ΔW, per
+Site × Trait. No multiple-testing correction applied.
 
 ```{r primary-9h}
 print(primary$s17, n = Inf)
@@ -750,11 +827,17 @@ sensitivity <- run_W_analyses(W_fec, plasticity,
 
 ## 10a. Pearson r: directional plasticity vs mean W
 
+**Sens. 10a.** As Table S12, but with W = observed family-mean
+fecundity instead of the aster BLUP.
+
 ```{r sens-10a}
 print(sensitivity$dir_meanW_cor, n = Inf)
 ```
 
 ## 10b. Eq. 5 — W_Y2 ~ W_Y1 + directional
+
+**Sens. 10b.** As Table S11 (Eq. 5), but with W = observed family-mean
+fecundity.
 
 ```{r sens-10b}
 print(sensitivity$eq5, n = Inf)
@@ -762,11 +845,17 @@ print(sensitivity$eq5, n = Inf)
 
 ## 10c. Eq. 6 — deltaW ~ mean_W + directional
 
+**Sens. 10c.** As Table S13 (Eq. 6), but with W = observed family-mean
+fecundity. ΔW / mean_W coupling caveat applies (see Table S13).
+
 ```{r sens-10c}
 print(sensitivity$eq6, n = Inf)
 ```
 
 ## 10d. Eq. 7/8 — deltaW ~ PIv
+
+**Sens. 10d.** As Table S14 (Eqs. 7/8), but with W = observed
+family-mean fecundity.
 
 ```{r sens-10d}
 print(sensitivity$eq78, n = Inf)
@@ -774,11 +863,17 @@ print(sensitivity$eq78, n = Inf)
 
 ## 10e. Table S10 equivalent — PIv vs W_Y2
 
+**Sens. 10e.** As Table S10, but with W = observed family-mean
+fecundity.
+
 ```{r sens-10e}
 print(sensitivity$s10, n = Inf)
 ```
 
 ## 10f. Table S15 equivalent — directional vs W_Y2
+
+**Sens. 10f.** As Table S15, but with W = observed family-mean
+fecundity.
 
 ```{r sens-10f}
 print(sensitivity$s15, n = Inf)
@@ -786,11 +881,17 @@ print(sensitivity$s15, n = Inf)
 
 ## 10g. Table S16 equivalent — PIv vs deltaW
 
+**Sens. 10g.** As Table S16, but with W = observed family-mean
+fecundity.
+
 ```{r sens-10g}
 print(sensitivity$s16, n = Inf)
 ```
 
 ## 10h. Table S17 equivalent — directional vs deltaW
+
+**Sens. 10h.** As Table S17, but with W = observed family-mean
+fecundity.
 
 ```{r sens-10h}
 print(sensitivity$s17, n = Inf)
@@ -844,11 +945,25 @@ comparison <- bind_rows(cmp_cor, cmp_eq5, cmp_eq6, cmp_eq78) %>%
 
 ## All Site × Trait × test comparisons
 
+**Comparison (all cells).** Per-cell side-by-side of the primary (aster
+BLUP) and sensitivity (observed fecundity) results across Eqs. 5, 6,
+8 (linear), and the directional × mean-W Pearson r. `agreement` flags
+cells nominally significant in (a) both, (b) one, or (c) neither
+metric. The "both p < 0.05" rule is a **cross-validation heuristic,
+not formal error control** — the two p-values are positively
+correlated (overlapping families), so the joint "both significant"
+event has no defined Type-I error rate.
+
 ```{r comparison-all}
 print(comparison, n = Inf)
 ```
 
 ## Cells where the two metrics disagree on significance
+
+**Disagreement.** Cells with nominal p < 0.05 in only one of the two
+fitness metrics. Under the multiple-testing burden of 4 sites × 4–5
+trait rows × ~6 tests, these are the cells most likely to be false
+positives.
 
 ```{r comparison-disagree}
 disagree <- comparison %>% filter(agreement %in% c("primary only",
@@ -857,6 +972,10 @@ print(disagree, n = Inf)
 ```
 
 ## Cells where both metrics reached p < 0.05
+
+**Agreement (both p < 0.05).** Cells reaching nominal p < 0.05 in both
+fitness metrics. The strongest candidates for real effects, but still
+without formal FDR/Bonferroni control.
 
 ```{r comparison-agree-sig}
 agree_sig <- comparison %>% filter(agreement == "both p<0.05")
@@ -881,7 +1000,7 @@ theme_plasticity <- theme_bw(base_size = 14) +
 Each line is one paternal family; line colour distinguishes whether the
 trait increased or decreased from Year 1 to Year 2.
 
-```{r fig5, fig.width=10, fig.height=9}
+```{r fig5, fig.width=10, fig.height=9, fig.cap="Figure 5. Year-to-year reaction norms of four functional traits in four populations. Each line is one paternal family; colour indicates whether the family mean increased (blue) or decreased (orange) from Year 1 (2022, dry) to Year 2 (2023, wet). One Blue Oak SLA outlier (mean > 30 mm²/mg) is hidden for readability and retained in all numerical analyses."}
 fig5_df <- purrr::map_dfr(SITES, function(site) {
   fm <- plasticity[[site]]$fam_means
   dir <- fm %>%
@@ -931,7 +1050,7 @@ fig5
 
 ## Figure 6: Multivariate plasticity trajectories (SLA × δ13C)
 
-```{r fig6, fig.width=14, fig.height=5}
+```{r fig6, fig.width=14, fig.height=5, fig.cap="Figure 6. Multivariate reaction-norm trajectories in SLA × δ¹³C space, one population per panel. Each arrow connects a paternal family's Year-1 mean (circle) to its Year-2 mean (triangle); arrow colour encodes the magnitude and sign of ΔSLA. Free axis scaling per panel emphasises within-population structure at the cost of across-population comparability."}
 fig6_df <- purrr::map_dfr(SITES, function(site) {
   fm_wide <- plasticity[[site]]$fam_means %>%
     filter(Trait %in% c("SLA_SEG", "d13C_SEG")) %>%
@@ -975,7 +1094,7 @@ fig6
 
 ## Figure 7: Variance partitioning (G, M, G×Y, residual)
 
-```{r fig7, fig.width=16, fig.height=5}
+```{r fig7, fig.width=16, fig.height=5, fig.cap="Figure 7. Variance partitioning from the G×Y full model (Eq. 4) per trait × population: percent of total trait variance attributable to paternal (sire), maternal, paternal × Year, and residual components. REML estimates. The paternal × Year component is the genetic variance in plasticity (the variance-component analog of Table S6's permutation test for the existence of within-family plasticity)."}
 varcomp_labels <- c(`Donor:Year` = "Paternal × Year (G × Y)",
                     Donor        = "Paternal Family",
                     Recipient    = "Maternal Family",
@@ -1015,7 +1134,7 @@ Top set of panels: primary analysis using aster sire effects.
 Bottom set of panels: sensitivity analysis using observed fecundity.
 Blue regression lines indicate p < 0.05 within that metric.
 
-```{r fig8, fig.width=12, fig.height=14}
+```{r fig8, fig.width=12, fig.height=14, fig.cap=c("Figure 8A. Primary analysis. Directional plasticity (x; Eq. 2) vs mean paternal-family fitness (y; aster sire-effect BLUP) per trait × population. Vermillion regression lines mark cells with nominal Pearson p < 0.05 (Table S12). No multiple-testing correction is applied to within-panel slopes; readers should weigh individual cells against BH or Bonferroni at α/16 ≈ 0.003.", "Figure 8B. Sensitivity analysis. Same axes as Figure 8A but with W = observed family-mean fecundity. Cells that reach nominal p < 0.05 in both Figure 8A and 8B (Section 11) are the strongest candidates for real associations.")}
 TRAIT_ROW_LEVELS <- c(unname(TRAIT_LABELS[TRAITS]), "multivariate")
 
 build_fig8_df <- function(W_df, sig_df) {
